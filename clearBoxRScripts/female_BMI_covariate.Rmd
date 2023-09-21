@@ -23,7 +23,7 @@ library(pheatmap)
 projectDir <- "/home/smit1924/preeclampsia_sex_chromosome_informed"
 # projectDir <- "/Users/pillmaka/Desktop/Melanie/drive-download"
 
-expt_name <- 'female_noCovariate'
+expt_name <- 'female_BMI_Covariate'
 
 counts_geneID_file <- file.path(projectDir, "clearBoxRawData/rawCounts_melanie_v2.0.3.csv")
 
