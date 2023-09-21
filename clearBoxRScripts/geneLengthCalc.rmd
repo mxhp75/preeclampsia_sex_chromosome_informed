@@ -1,0 +1,230 @@
+---
+title: "geneLengthCalc"
+author: "Melanie Smith"
+date: "3 August 2023"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+```{r}
+library(IRanges)
+library(GenomicFeatures)
+library(edgeR)
+# library(tidyverse)
+library(readxl)
+library(readr)
+library(magrittr)
+
+# set project directory
+projectDir <- "/home/smit1924/sexInformedPreeclampsia"
+expt_name <- "melanie_v2_0_3"
+
+genome_gtf_infile <- file.path(projectDir, "cleanData/gencode.v29.annotation.gtf")
+input_counts_female <- file.path(projectDir, "rawData/test_v2.0.3_female_readCounts.txt")
+input_counts_male <- file.path(projectDir, "rawData/test_v2.0.3_male_readCounts.txt")
+input_metadata_file <- file.path(projectDir, "clearBoxRawData/cleanSampleMetadata.csv")
+
+outdir <- file.path(projectDir, paste0(expt_name, "_output"))
+output_female_cibersort_file <- file.path(outdir, paste0(expt_name, "bulkCountMatrix_female.txt"))
+output_male_cibersort_file <- file.path(outdir, paste0(expt_name, "bulkCountMatrix_male.txt"))
+
+dir.create(outdir)
+
+# set max digits
+options(digits=3)
+
+# set filtering criteria
+filterCPM <- 2
+numSamples <- 5
+```
+
+Before I can transform my raw counts to TPMs I need to calculate the gene lengths from the original .gtf file.   
+
+```{r}
+
+# Try it
+# Specifics of calculating rpkm: https://support.bioconductor.org/p/64585/
+
+# 1. Get gene lengths
+# https://www.biostars.org/p/83901/
+# Or using GTFtools, but keep chromosome limitations in mind:
+# http://genomespot.blogspot.com/2019/01/using-gtf-tools-to-get-gene-lengths.html
+# GTFtools offers flexibility about how to calculate the gene length (median, mean, etc.)
+
+# Note, this is the gtf used in the RNA-Seq pipeline to annotatate hg38
+txdb <- GenomicFeatures::makeTxDbFromGFF(file = file.path(genome_gtf_infile), format = "gtf")
+# Collect exons per gene id
+exon_list_per_gene <- GenomicFeatures::exonsBy(txdb, by = "gene")
+exon_list_per_gene
+
+```
+
+```{r}
+
+# For each gene, reduce all exons to a set of non-overlapping exons, calculate their length (widths) and sum them
+exonic_gene_sizes <- 
+  sum(IRanges::width(IRanges::reduce(exon_list_per_gene))) %>% 
+  tibble::as_tibble(rownames = NA) %>% 
+  tibble::rownames_to_column(var = "gene") %>%
+  dplyr::select(., gene, length = value)
+exonic_gene_sizes
+
+```
+
+## Import metadata
+
+```{r}
+## Metadata
+metadata <- read_csv(file = input_metadata_file)
+male <- dplyr::filter(metadata, Sex == "M") %>%
+  dplyr::select(., samplename)
+female <- dplyr::filter(metadata, Sex == "F") %>%
+  dplyr::select(., samplename)
+```
+
+## Import count files
+### Import -s 2 counts (female)
+
+```{r import gene counts female}
+
+# import the counts table
+# counts are annotated to GRCh38
+rawCounts_female <- read.delim(file = input_counts_female) %>%
+  as.data.frame()
+# tidy up the column names
+colnames(rawCounts_female) <- gsub("X.scratch.user.smit1924.20230608_female_grch38.aligned_data.|
+                                 _GRCh38_Aligned.sortedByCoord.out.bam|_T.*|_",
+                                 "",
+                                 colnames(rawCounts_female))
+# remove the genes from the PAR_Y (all have zero counts)
+rawCounts_female %<>% dplyr::filter(., !grepl("PAR_Y",Geneid))
+# remove the number after the period
+#rawCounts_female %<>% tidyr::separate(., col = Geneid, into = c("ensembl", "right")) #%>%
+ # dplyr::select(., -right) %>%
+ # tibble::column_to_rownames("ensembl")
+
+dim(rawCounts_female)
+
+```
+
+### Import -s 2 counts (male)
+
+```{r import gene counts male}
+
+# import the counts table
+# counts are annotated to GRCh38
+rawCounts_male <- read.delim(file = input_counts_male) %>%
+  as.data.frame()
+# tidy up the column names
+colnames(rawCounts_male) <- gsub("X.scratch.user.smit1924.20230608_male_grch38.aligned_data.|
+                                 _GRCh38_Aligned.sortedByCoord.out.bam|_T.*|_",
+                                 "",
+                                 colnames(rawCounts_male))
+# remove the genes from the PAR_Y (all have zero counts)
+rawCounts_male %<>% dplyr::filter(., !grepl("PAR_Y",Geneid))
+# remove the number after the period
+# rawCounts_male %<>% tidyr::separate(., col = Geneid, into = c("ensembl", "right")) %>%
+#   dplyr::select(., -right) %>%
+#   tibble::column_to_rownames("ensembl")
+
+dim(rawCounts_male)
+
+```
+
+## Combine counts data into a single df
+
+```{r combine counts, echo=FALSE}
+
+# test to make sure the rownames are the same
+identical(rownames(rawCounts_male), rownames(rawCounts_female))
+
+# combine the counts tables
+rawCounts_melanie_v2.0.3 <- dplyr::left_join(rawCounts_male,
+                                             rawCounts_female,
+                                             by = "Geneid")
+dim(rawCounts_melanie_v2.0.3)
+
+rownames(rawCounts_melanie_v2.0.3) <- NULL # Resets numbers to start at one after omitting first four rows loading data
+colnames(rawCounts_melanie_v2.0.3)[1] <- "gene_id" # rename the gene column to match Nick's code
+
+```
+
+```{r}
+
+# 2. Process raw count data in edgeR again, as per melanieRawCountsProcessing_v2.0.3.rmd
+# Add gene length to expression data
+raw_data <- rawCounts_melanie_v2.0.3 %>%
+  dplyr::mutate(Length = exonic_gene_sizes$length[match(gene_id, exonic_gene_sizes$gene)])
+
+raw_data <- raw_data %>% 
+  tibble::column_to_rownames("gene_id")
+head(raw_data)
+dim(raw_data) # 58676, 62
+
+y <- edgeR::DGEList(counts = raw_data %>% dplyr::select(-Length),
+             genes = raw_data %>% dplyr::select(Length))
+
+y
+y$genes # A Length column is present 
+dim(y)
+
+head(y$counts) # Gene names are set as rownames
+y$samples$lib.size # 28672359 15180417 10138344 25759561 15425026  5507928 12896174 10837351 12385640 14295205 21626993 11278639 20747792 28461227 31442737 15942814 22769037 12135572 11522629 11513311 10905097 13277754 11656794 31028631 16773925 23481555 11815919 11496632 13894031  7324003  9328523 12036392 24086651 10037391  8056703 19991087 13302511 24764993 21123282 1061741023868182 23565833 21228375  8322559 10481438 14577169 27111041 25782537 16716060 28683991 20543590 26769134 30312948 11817289 15148504 22441450 21472467 11815890  9975559 14182153 23677776
+
+
+# Identify genes expressed at > 1 cpm in at least one sample
+keep <- rowSums(cpm(y) > filterCPM) >= numSamples
+table(keep) # Keeping 13767 genes
+
+# Apply filter
+y <- y[keep, , keep.lib.sizes = FALSE]
+dim(y) # 13767    61
+y$samples$lib.size #  [1] 28560726 15136770 10100249 25663833 15375726  5488629 12864451 10770829 12351400 14263116 21554351 11249107 20697206 28394755 31340006 15899816 22691259 12095922 11495031 11479567 10878389 13248649 11628020 30953360 16692824 23417827 11785035 11450192 13853216  7278418  9293300 11994632 24021150  9991298  8026111 19902251 13268681 24694085 21073254 10583684 23790639 23498429 21172150  8290759 10459540 14537255 27048799 25726813 16639072 28621212 20497079 26692901 30228143 11780383 15106099 22380057 21424653 11787178  9939070 14147218 23631072
+
+# TMM normalisation 
+y$samples$norm.factors # currently all normalisation factors == 1
+y <- calcNormFactors(y, method = "TMM")
+y$samples$norm.factors # 1.098 0.922 1.029 1.006 0.854 1.054 1.037 1.072 1.114 0.913 1.121 0.994 1.032 0.905 0.967 1.022 1.034 1.090 1.024 0.944 0.902 0.978 0.926 1.020 1.156 1.003 1.051 1.027 0.995 0.964 1.045 0.951 0.949 1.089 1.193 1.000 1.020 1.058 0.974 0.895 0.941 1.036 1.098 0.963 0.895 1.004 0.931 0.945 1.163 0.954 0.969 1.010 0.955 0.924 0.937 1.051 0.945 0.987 1.067 0.975 0.974
+
+# Now calculate RPKM: https://support.bioconductor.org/p/64585/
+rpkm <- rpkm(y)
+
+# And TPM: https://www.biostars.org/p/388584/#394579
+tpm <- t( t(rpkm) / colSums(rpkm) ) * 1e6
+# These TPM values now incorporate the TMM factors
+
+# I'll output this for use with CIBERSORTx
+small_tpm <- tpm[, 1:4]
+male_tpm <- tpm[, male$samplename]
+female_tpm <- tpm[, female$samplename]
+
+male_tpm %>%
+  tibble::as_tibble(rownames = NA) %>%
+  tibble::rownames_to_column(var = "gene") %>% 
+  # remove the number after the period
+  tidyr::separate(., col = gene, into = c("gene", "right")) %>% 
+  dplyr::select(., -right) %>%
+  # save TPM count file for CIBERSTORTx
+  write.table(file = output_male_cibersort_file,
+              quote = FALSE,
+              sep = "\t",
+              col.names = TRUE,
+              row.names = FALSE)
+
+female_tpm %>%
+  tibble::as_tibble(rownames = NA) %>%
+  tibble::rownames_to_column(var = "gene") %>% 
+  # remove the number after the period
+  tidyr::separate(., col = gene, into = c("gene", "right")) %>% 
+  dplyr::select(., -right) %>%
+  # save TPM count file for CIBERSTORTx
+  write.table(file = output_female_cibersort_file,
+              quote = FALSE,
+              sep = "\t",
+              col.names = TRUE,
+              row.names = FALSE)
+
+```

@@ -1,0 +1,599 @@
+---
+title: "plots, lots of plots"
+author: "Melanie Smith"
+date: "12 July 2023"
+output: html_document
+---
+
+Now that we have a number of different models run within the preeclampsia SCOPE + STOP RNA-seq data (with and without covariates), this script is used to compare the model outputs such as logFC, p-value, sigma and t-statistic. Only model outputs related to the `featureCounts` v2.0.3 sex informed counts is considered.  
+
+# Load required libraries
+```{r load Libraries}
+library(plyr)
+library(reshape2)
+library(dplyr)
+library(tidyr)
+library(stringr)
+library(edgeR)
+library(readxl)
+library(readr)
+library(magrittr)
+library(ggplot2)
+library(tibble)
+# library(ggbeeswarm)
+# library(ggrepel)
+# library(RColorBrewer)
+# library(pheatmap)
+# library(ggpubr)
+
+# set project directory
+projectDir <- "/home/smit1924/sexInformedPreeclampsia"
+# projectDir <- "/Users/pillmaka/Desktop/Melanie/drive-download"
+
+# define input files
+melanie_v2_0_3_filtered_inFile <- file.path(projectDir, "melanie_v2_0_3_output/melanie_v2_0_3filtered_DE.csv")
+melanie_v2_0_3_pValue_inFile <- file.path(projectDir, "melanie_v2_0_3_output/melanie_v2_0_3pValue_DE.csv")
+maternalAgefiltered_infile <- file.path(projectDir, "maternalAge_output/maternalAgefiltered_DE.csv")
+maternalBMIfiltered_infile <- file.path(projectDir, "maternalBMI_output/maternalBMIfiltered_DE.csv")
+maternalAgePvalue_infile <- file.path(projectDir, "maternalAge_output/maternalAgepValue_DE.csv")
+maternalBMIPvalue_infile <- file.path(projectDir, "maternalBMI_output/maternalBMIpValue_DE.csv")
+noCovariateDE_infile <- file.path(projectDir, "noCovariate_output/noCovariatefiltered_DE.csv")
+noCovariatePvalue_infile <- file.path(projectDir, "noCovariate_output/noCovariatepValue_DE.csv")
+
+# define out Dir
+outPlotsDir <- file.path(projectDir, "clearBoxPlots/")
+
+dir.create(outPlotsDir)
+```
+
+# Import DE files
+
+```{r}
+thesis_model_DE <- read_csv(file = melanie_v2_0_3_filtered_inFile)
+thesis_model_pValue <- read_csv(file = melanie_v2_0_3_pValue_inFile)
+maternalAge_model_DE <- read_csv(file = maternalAgefiltered_infile)
+maternalAge_pValue <- read_csv(file = maternalAgePvalue_infile)
+maternalBMI_model_DE <- read_csv(file = maternalBMIfiltered_infile)
+maternalBMI_pValue <- read_csv(file = maternalBMIPvalue_infile)
+noCovariate_model_DE <- read_csv(file = noCovariateDE_infile)
+noCovariate_pValue <- read_csv(file = noCovariatePvalue_infile)
+```
+
+# Combine the tables (logFC, adj.P.Val and sigma retained)
+
+```{r}
+# DE using filtered counts (2CPM in 5 samples)
+combined_LogFC <- dplyr::full_join(
+  maternalAge_model_DE %>% dplyr::select(ensembl_gene_id, hgnc_symbol, sigma, logFC_F, logFC_M, adj.P.Val_F, adj.P.Val_M),
+  maternalBMI_model_DE %>% dplyr::select(ensembl_gene_id, hgnc_symbol, sigma, logFC_F, logFC_M, adj.P.Val_F, adj.P.Val_M),
+                                  by=c('hgnc_symbol', 'ensembl_gene_id'),
+                                  suffix=c("_age", "_bmi")) %>%
+  dplyr::full_join(., thesis_model_DE %>% dplyr::select(ensembl_gene_id, hgnc_symbol, sigma,
+                                                        logFC_F_thesis = logFC_F,
+                                                        logFC_M_thesis = logFC_M,
+                                                        adj.P.Val_F_thesis = adj.P.Val_F,
+                                                        adj.P.Val_M_thesis = adj.P.Val_M),
+                   by=c('hgnc_symbol', 'ensembl_gene_id')) %>%
+  dplyr::full_join(., noCovariate_model_DE %>% dplyr::select(ensembl_gene_id, hgnc_symbol, sigma,
+                                                        logFC_F_noCovariate = logFC_F,
+                                                        logFC_M_noCovariate = logFC_M,
+                                                        adj.P.Val_F_noCovariate = adj.P.Val_F,
+                                                        adj.P.Val_M_noCovariate = adj.P.Val_M),
+                   by=c('hgnc_symbol', 'ensembl_gene_id'))
+
+combined_pValue <- dplyr::full_join(maternalAge_pValue, maternalBMI_pValue,
+                                    by=c('hgnc_symbol', 'ensembl_gene_id'),
+                                    suffix=c("_age", "_bmi")) %>%
+  dplyr::full_join(., thesis_model_pValue %>% dplyr::select(ensembl_gene_id, hgnc_symbol,
+                                                        t_F_thesis = t_F,
+                                                        P.Value_F_thesis = P.Value_F,
+                                                        adj.P.Val_F_thesis = adj.P.Val_F,
+                                                        t_M_thesis = t_M,
+                                                        P.Value_M_thesis = P.Value_M,
+                                                        adj.P.Val_M_thesis = adj.P.Val_M),
+                   by=c('hgnc_symbol', 'ensembl_gene_id')) %>%
+  dplyr::full_join(., noCovariate_pValue %>% dplyr::select(ensembl_gene_id, hgnc_symbol,
+                                                        t_F_noCovariate = t_F,
+                                                        P.Value_F_noCovariate = P.Value_F,
+                                                        adj.P.Val_F_noCovariate = adj.P.Val_F,
+                                                        t_M_noCovariate = t_M,
+                                                        P.Value_M_noCovariate = P.Value_M,
+                                                        adj.P.Val_M_noCovariate = adj.P.Val_M),
+                   by=c('hgnc_symbol', 'ensembl_gene_id'))
+
+```
+
+# Scatter plot of p-Values
+
+```{r}
+# thesis model versus maternal age only
+ggplot(combined_pValue,
+       aes(x = -log10(P.Value_F_thesis),
+           y = -log10(P.Value_F_age))) +
+  geom_point() +
+  xlim(0, max(-log10(combined_pValue$P.Value_F_thesis), -log10(combined_pValue$P.Value_F_age))) +
+  ylim(0, max(-log10(combined_pValue$P.Value_F_thesis), -log10(combined_pValue$P.Value_F_age))) +
+  geom_abline(intercept = 0, slope = 1, size = 0.5, colour="red") +
+  ggtitle("Female: thesis model versus age only model (-log10(p.val))")
+ggsave(filename = file.path(outPlotsDir, "neglog10PVal_thesis_age_F.png"),
+       width = 7,
+       height = 7,
+       units = "in",
+       dpi = 150)
+# thesis model versus maternal bmi only
+ggplot(combined_pValue,
+       aes(x = -log10(P.Value_F_thesis),
+           y = -log10(P.Value_F_bmi))) +
+  geom_point() +
+  xlim(0, max(-log10(combined_pValue$P.Value_F_thesis), -log10(combined_pValue$P.Value_F_bmi))) +
+  ylim(0, max(-log10(combined_pValue$P.Value_F_thesis), -log10(combined_pValue$P.Value_F_bmi))) +
+  geom_abline(intercept = 0, slope = 1, size = 0.5, colour="red") +
+  ggtitle("Female: thesis model versus bmi only model (-log10(p.val))")
+ggsave(filename = file.path(outPlotsDir, "neglog10PVal_thesis_bmi_F.png"),
+       width = 7,
+       height = 7,
+       units = "in",
+       dpi = 150)
+# no covariate model versus maternal age only
+ggplot(combined_pValue,
+       aes(x = -log10(P.Value_F_noCovariate),
+           y = -log10(P.Value_F_age))) +
+  geom_point() +
+  xlim(0, max(-log10(combined_pValue$P.Value_F_noCovariate), -log10(combined_pValue$P.Value_F_age))) +
+  ylim(0, max(-log10(combined_pValue$P.Value_F_noCovariate), -log10(combined_pValue$P.Value_F_age))) +
+  geom_abline(intercept = 0, slope = 1, size = 0.5, colour="red") +
+  ggtitle("Female: no covariate model versus age only model (-log10(p.val))")
+ggsave(filename = file.path(outPlotsDir, "neglog10PVal_noCovariate_age_F.png"),
+       width = 7,
+       height = 7,
+       units = "in",
+       dpi = 150)
+# no covariate model versus maternal bmi only
+ggplot(combined_pValue,
+       aes(x = -log10(P.Value_F_noCovariate),
+           y = -log10(P.Value_F_bmi))) +
+  geom_point() +
+  xlim(0, max(-log10(combined_pValue$P.Value_F_noCovariate), -log10(combined_pValue$P.Value_F_bmi))) +
+  ylim(0, max(-log10(combined_pValue$P.Value_F_noCovariate), -log10(combined_pValue$P.Value_F_bmi))) +
+  geom_abline(intercept = 0, slope = 1, size = 0.5, colour="red") +
+  ggtitle("Female: no covariate model versus bmi only model (-log10(p.val))")
+ggsave(filename = file.path(outPlotsDir, "neglog10PVal_noCovariate_bmi_F.png"),
+       width = 7,
+       height = 7,
+       units = "in",
+       dpi = 150)
+```
+
+# Histogram plot P-Value
+## model includes maternal age and maternal BMI
+```{r}
+# plot p-value thesis model in females
+ggplot(data = combined_pValue,
+       aes(x = P.Value_F_thesis)) +
+  geom_histogram(binwidth = 0.01) +
+      theme_bw() +
+  theme(text = element_text(size=18)) +
+  theme(axis.text.x = element_text(colour = "black",
+                                   face = "bold"),
+        axis.text.y = element_text(colour = "black",
+                                   face = "bold")) +
+  theme(axis.title.x = element_text(colour = "black",
+                                   face = "bold"),
+        axis.title.y = element_text(colour = "black",
+                                   face = "bold")) +
+  ggtitle("p-value maternal age and BMI as covariate in females")
+# plot p-value thesis model in males
+ggplot(data = combined_pValue,
+       aes(x = P.Value_M_thesis)) +
+  geom_histogram(binwidth = 0.01) +
+            theme_bw() +
+  theme(text = element_text(size=18)) +
+  theme(axis.text.x = element_text(colour = "black",
+                                   face = "bold"),
+        axis.text.y = element_text(colour = "black",
+                                   face = "bold")) +
+  theme(axis.title.x = element_text(colour = "black",
+                                   face = "bold"),
+        axis.title.y = element_text(colour = "black",
+                                   face = "bold")) +
+  ggtitle("p-value thesis model in males")
+```
+
+# Histogram plot P-Value
+## model includes maternal age only
+```{r}
+# plot p-value maternal age as covariate in females
+ggplot(data = combined_pValue,
+       aes(x = P.Value_F_age)) +
+  geom_histogram(binwidth = 0.01) +
+    theme_bw() +
+  theme(text = element_text(size=18)) +
+  theme(axis.text.x = element_text(colour = "black",
+                                   face = "bold"),
+        axis.text.y = element_text(colour = "black",
+                                   face = "bold")) +
+  theme(axis.title.x = element_text(colour = "black",
+                                   face = "bold"),
+        axis.title.y = element_text(colour = "black",
+                                   face = "bold")) +
+  ggtitle("p-value maternal age as covariate in females")
+# plot p-value maternal age as covariate in males
+ggplot(data = combined_pValue,
+       aes(x = P.Value_M_age)) +
+  geom_histogram(binwidth = 0.01) +
+          theme_bw() +
+  theme(text = element_text(size=18)) +
+  theme(axis.text.x = element_text(colour = "black",
+                                   face = "bold"),
+        axis.text.y = element_text(colour = "black",
+                                   face = "bold")) +
+  theme(axis.title.x = element_text(colour = "black",
+                                   face = "bold"),
+        axis.title.y = element_text(colour = "black",
+                                   face = "bold")) +
+  ggtitle("p-value maternal age as covariate in males")
+```
+
+## model includes maternal BMI only
+```{r}
+# plot p-value maternal bmi as covariate in females
+ggplot(data = combined_pValue,
+       aes(x = P.Value_F_bmi)) +
+  geom_histogram(binwidth = 0.01) +
+        theme_bw() +
+  theme(text = element_text(size=18)) +
+  theme(axis.text.x = element_text(colour = "black",
+                                   face = "bold"),
+        axis.text.y = element_text(colour = "black",
+                                   face = "bold")) +
+  theme(axis.title.x = element_text(colour = "black",
+                                   face = "bold"),
+        axis.title.y = element_text(colour = "black",
+                                   face = "bold")) +
+  ggtitle("p-value maternal BMI as covariate in females")
+
+# plot p-value maternal bmi as covariate in males
+ggplot(data = combined_pValue,
+       aes(x = P.Value_M_bmi)) +
+  geom_histogram(binwidth = 0.01) +
+              theme_bw() +
+  theme(text = element_text(size=18)) +
+  theme(axis.text.x = element_text(colour = "black",
+                                   face = "bold"),
+        axis.text.y = element_text(colour = "black",
+                                   face = "bold")) +
+  theme(axis.title.x = element_text(colour = "black",
+                                   face = "bold"),
+        axis.title.y = element_text(colour = "black",
+                                   face = "bold")) +
+  ggtitle("p-value maternal bmi as covariate in males")
+```
+
+## model includes no covariates
+```{r}
+# plot p-value maternal bmi as covariate in females
+ggplot(data = combined_pValue,
+       aes(x = P.Value_F_noCovariate)) +
+          theme_bw() +
+  theme(text = element_text(size=18)) +
+  theme(axis.text.x = element_text(colour = "black",
+                                   face = "bold"),
+        axis.text.y = element_text(colour = "black",
+                                   face = "bold")) +
+  theme(axis.title.x = element_text(colour = "black",
+                                   face = "bold"),
+        axis.title.y = element_text(colour = "black",
+                                   face = "bold")) +
+  geom_histogram(binwidth = 0.01) +
+  
+  ggtitle("p-value no covariate in females")
+
+# plot p-value maternal bmi as covariate in males
+ggplot(data = combined_pValue,
+       aes(x = P.Value_M_noCovariate)) +
+  geom_histogram(binwidth = 0.01) +
+            theme_bw() +
+  theme(text = element_text(size=18)) +
+  theme(axis.text.x = element_text(colour = "black",
+                                   face = "bold"),
+        axis.text.y = element_text(colour = "black",
+                                   face = "bold")) +
+  theme(axis.title.x = element_text(colour = "black",
+                                   face = "bold"),
+        axis.title.y = element_text(colour = "black",
+                                   face = "bold")) +
+  ggtitle("p-value no covariate in males")
+```
+
+# Histogram plot t-statistic
+## model includes maternal age only
+```{r}
+# plot t-statistic maternal age as covariate in females
+ggplot(data = combined_pValue,
+       aes(x = t_F_age)) +
+  geom_histogram(binwidth = 0.1) +
+  ggtitle("t-statistic maternal age as covariate in females")
+# plot t-statistic maternal age as covariate in males
+ggplot(data = combined_pValue,
+       aes(x = t_M_age)) +
+  geom_histogram(binwidth = 0.1) +
+  ggtitle("t-statistic maternal age as covariate in males")
+```
+
+## model includes maternal bmi only
+```{r}
+# plot t-statistic maternal age as covariate in females
+ggplot(data = combined_pValue,
+       aes(x = t_F_bmi)) +
+  geom_histogram(binwidth = 0.1) +
+  ggtitle("t-statistic maternal BMI as covariate in females")
+# plot t-statistic maternal bmi as covariate in males
+ggplot(data = combined_pValue,
+       aes(x = t_M_bmi)) +
+  geom_histogram(binwidth = 0.1) +
+  ggtitle("t-statistic maternal BMI as covariate in males")
+```
+
+# plot adjusted p-value
+## no covariate model compared to age only model
+```{r}
+# plot logged adjusted.p.value no covariate versus age only in females
+ggplot(combined_LogFC,
+       aes(x = -log10(adj.P.Val_F_noCovariate),
+           y = -log10(adj.P.Val_F_age))) +
+  geom_point() +
+  ggtitle("Female: No covariate versus age only model (-log10(adj.p.val))")
+ggsave(filename = file.path(outPlotsDir, "neglog10AdjPVal_noCovariate_age_F.png"),
+       width = 7,
+       height = 7,
+       units = "in",
+       dpi = 150)
+# plot logged adjusted.p.value no covariate versus age only in males
+ggplot(combined_LogFC,
+       aes(x = -log10(adj.P.Val_M_noCovariate),
+           y = -log10(adj.P.Val_M_age))) +
+  geom_hline(yintercept=1.30103, linetype="dashed", color = "red") +
+  geom_vline(xintercept=1.30103, linetype="dashed", color = "red") +
+  geom_point() +
+  xlim(2.5, 0) +
+  ylim(2.5, 0) +
+  geom_abline(intercept = 0, slope = 1, size = 0.5, colour="red") +
+  ggtitle("Male: No covariate versus age only model (-log10(adj.p.val))")
+ggsave(filename = file.path(outPlotsDir, "neglog10AdjPVal_noCovariate_age_M.png"),
+       width = 7,
+       height = 7,
+       units = "in",
+       dpi = 150)
+```
+
+## no covariate model compared to bmi only model
+```{r}
+# plot logged adjusted.p.value no covariate versus bmi only in females
+ggplot(combined_LogFC,
+       aes(x = -log10(adj.P.Val_F_noCovariate),
+           y = -log10(adj.P.Val_F_bmi))) +
+  geom_point() +
+  ggtitle("Female: No covariate versus bmi only model (-log10(adj.p.val))")
+ggsave(filename = file.path(outPlotsDir, "neglog10AdjPVal_noCovariate_bmi_F.png"),
+       width = 7,
+       height = 7,
+       units = "in",
+       dpi = 150)
+# plot logged adjusted.p.value no covariate versus bmi only in males
+ggplot(combined_LogFC,
+       aes(x = -log10(adj.P.Val_M_noCovariate),
+           y = -log10(adj.P.Val_M_bmi))) +
+  geom_hline(yintercept=1.30103, linetype="dashed", color = "red") +
+  geom_vline(xintercept=1.30103, linetype="dashed", color = "red") +
+  geom_point() +
+  xlim(2.5, 0) +
+  ylim(2.5, 0) +
+  geom_abline(intercept = 0, slope = 1, size = 0.5, colour="red") +
+  ggtitle("Male: No covariate versus bmi only model (-log10(adj.p.val))")
+ggsave(filename = file.path(outPlotsDir, "neglog10AdjPVal_noCovariate_bmi_M.png"),
+       width = 7,
+       height = 7,
+       units = "in",
+       dpi = 150)
+
+```
+
+## model with onyl maternalAge compared to thesis model
+```{r}
+# plot logged adjusted.p.value maternal age versus thesis in females
+ggplot(combined_LogFC,
+       aes(x = -log10(adj.P.Val_F_thesis),
+           y = -log10(adj.P.Val_F_age))) +
+  geom_point() +
+  ggtitle("Female: Age only versus thesis model (-log10(adj.p.val))")
+ggsave(filename = file.path(outPlotsDir, "neglog10AdjPVal_age_thesis_F.png"),
+       width = 7,
+       height = 7,
+       units = "in",
+       dpi = 150)
+# plot logged adjusted.p.value maternal age versus thesis in males
+ggplot(combined_LogFC,
+       aes(x = -log10(adj.P.Val_M_thesis),
+           y = -log10(adj.P.Val_M_age))) +
+  geom_hline(yintercept=1.30103, linetype="dashed", color = "red") +
+  geom_vline(xintercept=1.30103, linetype="dashed", color = "red") +
+  geom_point() +
+  xlim(2.5, 0) +
+  ylim(2.5, 0) +
+  geom_abline(intercept = 0, slope = 1, size = 0.5, colour="red") +
+  ggtitle("Male: Age only versus thesis model (-log10(adj.p.val))")
+ggsave(filename = file.path(outPlotsDir, "neglog10AdjPVal_age_thesis_M.png"),
+       width = 7,
+       height = 7,
+       units = "in",
+       dpi = 150)
+
+# png(file=file.path(outPlotsDir, "heatmap_sig_AdjPVal_M.png"),
+#     width=12,
+#     height=8,
+#     units = "in",
+#     res = 150)
+# pheatmap(dplyr::filter(combined_LogFC, adj.P.Val_M_bmi < 0.05 | adj.P.Val_M_thesis < 0.05 & 0.05 | adj.P.Val_M_age < 0.05) %>%
+#            dplyr::select(hgnc_symbol, adj.P.Val_M_thesis, adj.P.Val_M_age, adj.P.Val_M_bmi) %>%
+#            tibble::column_to_rownames("hgnc_symbol"),
+#          cluster_rows = T,
+#          cluster_cols = F,
+#          show_rownames = TRUE, 
+#          color = c("green", "grey"),
+#          breaks = c(0, 0.05, .11),  # distances 0 to 0.05 are green, 0.05 to 1.1 grey
+#          main = 'Male sig p-value')
+# dev.off()
+
+```
+
+## model with onyl maternal BMI compared to thesis model
+```{r}
+# plot logged adjusted.p.value maternal bmi versus thesis in females
+ggplot(combined_LogFC,
+       aes(x = -log10(adj.P.Val_F_thesis),
+           y = -log10(adj.P.Val_F_bmi))) +
+  geom_point() +
+  ggtitle("Female: BMI only versus thesis model (-log10(adj.p.val))")
+ggsave(filename = file.path(outPlotsDir, "neglog10AdjPVal_bmi_thesis_F.png"),
+       width = 7,
+       height = 7,
+       units = "in",
+       dpi = 150)
+# plot logged adjusted.p.value maternal bmi versus thesis in males
+ggplot(combined_LogFC,
+       aes(x = -log10(adj.P.Val_M_thesis),
+           y = -log10(adj.P.Val_M_bmi))) +
+    geom_hline(yintercept=1.30103, linetype="dashed", color = "red") +
+  geom_vline(xintercept=1.30103, linetype="dashed", color = "red") +
+  geom_point() +
+  xlim(2.5, 0) +
+  ylim(2.5, 0) +
+  geom_abline(intercept = 0, slope = 1, size = 0.5, colour="red") +
+  ggtitle("Male: BMI only versus thesis model (-log10(adj.p.val))")
+ggsave(filename = file.path(outPlotsDir, "neglog10AdjPVal_bmi_thesis_M.png"),
+       width = 7,
+       height = 7,
+       units = "in",
+       dpi = 150)
+
+
+```
+
+# plot logFC
+## Model with only maternaAge compared to thesis model
+```{r}
+# male age only versus thesis logFC
+ggplot(data = combined_LogFC,
+       aes(x = logFC_M_age,
+           y = logFC_M_thesis)) +
+  geom_point() +
+  xlim(-7, 7) +
+  ylim(-7, 7) +
+  ggtitle("Male: age only versus thesis model (log2FC)")
+ggsave(filename = file.path(outPlotsDir, "logFC_age_thesis_M.png"),
+       width = 7,
+       height = 7,
+       units = "in",
+       dpi = 150)
+# female age only versus thesis logFC
+ggplot(data = combined_LogFC,
+       aes(x = logFC_F_age,
+           y = logFC_F_thesis)) +
+  geom_point() +
+  xlim(-7, 7) +
+  ylim(-7, 7) +
+  ggtitle("Female: age only versus thesis model (log2FC)")
+ggsave(filename = file.path(outPlotsDir, "logFC_age_thesis_F.png"),
+       width = 7,
+       height = 7,
+       units = "in",
+       dpi = 150)
+
+```
+
+## Model with only maternaBMI compared to thesis model
+```{r}
+# male BMI only versus thesis logFC
+ggplot(data = combined_LogFC,
+       aes(x = logFC_M_bmi,
+           y = logFC_M_thesis)) +
+  geom_point() +
+  xlim(-7, 7) +
+  ylim(-7, 7) +
+  ggtitle("Male: bmi only versus thesis model (log2FC)")
+ggsave(filename = file.path(outPlotsDir, "logFC_bmi_thesis_M.png"),
+       width = 7,
+       height = 7,
+       units = "in",
+       dpi = 150)
+# female BMI only versus thesis logFC
+ggplot(data = combined_LogFC,
+       aes(x = logFC_F_bmi,
+           y = logFC_F_thesis)) +
+  geom_point() +
+  xlim(-7, 7) +
+  ylim(-7, 7) +
+  ggtitle("Female: bmi only versus thesis model (log2FC)")
+ggsave(filename = file.path(outPlotsDir, "logFC_bmi_thesis_F.png"),
+       width = 7,
+       height = 7,
+       units = "in",
+       dpi = 150)
+```
+
+## Plot model sigma
+```{r}
+# male BMI only versus thesis logFC
+ggplot(data = combined_LogFC,
+       aes(x = sigma,
+           y = sigma_age)) +
+  geom_point() +
+  xlim(0, 10) +
+  ylim(0, 10) +
+  ggtitle("sigma: thesis v age only model")
+ggsave(filename = file.path(outPlotsDir, "sigma_thesis_age.png"),
+       width = 7,
+       height = 7,
+       units = "in",
+       dpi = 150)
+# female BMI only versus thesis logFC
+ggplot(data = combined_LogFC,
+       aes(x = sigma,
+           y = sigma_bmi)) +
+  geom_point() +
+  xlim(0, 10) +
+  ylim(0, 10) +
+  ggtitle("sigma: thesis v bmi only model")
+ggsave(filename = file.path(outPlotsDir, "sigma_thesis_bmi.png"),
+       width = 7,
+       height = 7,
+       units = "in",
+       dpi = 150)
+```
+
+# plot logFC for top 200 against covariate coefficiant
+```{r}
+# plot logFC against age coefficient
+ggplot(data = dplyr::arrange(thesis_model_DE, adj.P.Val_M)[1:200,],
+       aes(x = logFC_M,
+           y = maternalAge)) +
+  geom_point() +
+  geom_smooth(method=lm) +
+    ggtitle("Maternal Age Coefficient as a function of logFC (top 200 genes)")
+# plot logFC against bmi coefficient
+ggplot(data = dplyr::arrange(thesis_model_DE, adj.P.Val_M)[1:200,],
+       aes(x = logFC_M,
+           y = BMI)) +
+  geom_point() +
+  geom_smooth(method=lm) +
+    ggtitle("Maternal BMI Coefficient as a function of logFC (top 200 genes)")
+
+```
+
+# Session information
+
+```{r session info}
+
+sessionInfo()
+
+```

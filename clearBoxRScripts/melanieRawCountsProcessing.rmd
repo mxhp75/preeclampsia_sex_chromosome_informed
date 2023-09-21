@@ -1,0 +1,129 @@
+---
+title: "melanieProcessing"
+author: "Melanie Smith"
+date: "11 July 2023"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(
+    echo = TRUE,
+    message = FALSE,
+    warning = FALSE,
+    cache = FALSE,
+    fig.align = "center",
+    results = "hide"
+)
+
+```
+
+# Load required libraries
+
+```{r load Libraries}
+
+library(plyr)
+library(reshape2)
+library(dplyr)
+library(stringr)
+library(edgeR)
+library(readxl)
+library(readr)
+library(magrittr)
+library(ggplot2)
+library(ggbeeswarm)
+library(ggrepel)
+library(RColorBrewer)
+library(pheatmap)
+library(ggpubr)
+
+# set project directory
+projectDir <- "/home/smit1924/sexInformedPreeclampsia"
+input_counts_female <- file.path(projectDir, "rawData/test_v1.6.4_female_readCounts.txt")
+input_counts_male <- file.path(projectDir, "rawData/test_v1.6.4_male_readCounts.txt")
+outfile <- file.path(projectDir, "clearBoxRawData/rawCounts_melanie_v1.6.4.csv")
+
+```
+
+## Import count files
+### Import -s 2 counts (female)
+
+```{r import gene counts female}
+
+# import the counts table
+# counts are annotated to GRCh38
+rawCounts_female <- read.delim(file = input_counts_female) %>%
+  as.data.frame()
+# tidy up the column names
+colnames(rawCounts_female) <- gsub("X.scratch.user.smit1924.20230608_female_grch38.aligned_data.|
+                                 _GRCh38_Aligned.sortedByCoord.out.bam|_T.*|_",
+                                 "",
+                                 colnames(rawCounts_female))
+# remove the genes from the PAR_Y (all have zero counts)
+rawCounts_female %<>% dplyr::filter(., !grepl("PAR_Y",Geneid))
+# remove the number after the period
+rawCounts_female %<>% tidyr::separate(., col = Geneid, into = c("ensembl", "right")) %>%
+  dplyr::select(., -right) %>%
+  tibble::column_to_rownames("ensembl")
+
+dim(rawCounts_female)
+
+```
+### Import -s 2 counts (male)
+
+```{r import gene counts male}
+
+# import the counts table
+# counts are annotated to GRCh38
+rawCounts_male <- read.delim(file = input_counts_male) %>%
+  as.data.frame()
+# tidy up the column names
+colnames(rawCounts_male) <- gsub("X.scratch.user.smit1924.20230608_male_grch38.aligned_data.|
+                                 _GRCh38_Aligned.sortedByCoord.out.bam|_T.*|_",
+                                 "",
+                                 colnames(rawCounts_male))
+# remove the genes from the PAR_Y (all have zero counts)
+rawCounts_male %<>% dplyr::filter(., !grepl("PAR_Y",Geneid))
+# remove the number after the period
+rawCounts_male %<>% tidyr::separate(., col = Geneid, into = c("ensembl", "right")) %>%
+  dplyr::select(., -right) %>%
+  tibble::column_to_rownames("ensembl")
+
+dim(rawCounts_male)
+
+```
+
+## Combine counts data into a single file and save (.csv)
+
+```{r combine counts, echo=FALSE}
+
+# test to make sure the rownames are the same
+identical(rownames(rawCounts_male), rownames(rawCounts_female))
+
+# combine the counts tables
+rawCounts_melanie_v1.6.4 <- dplyr::left_join(rawCounts_male %>%
+                                               tibble::rownames_to_column("Geneid"),
+                                             rawCounts_female %>%
+                                               tibble::rownames_to_column("Geneid"),
+                                             by = "Geneid")
+dim(rawCounts_melanie_v1.6.4)
+
+```
+
+## Save a clean copy of the raw counts file (.csv)
+
+```{r}
+
+# save a csv of the combined raw counts table
+# write_csv(rawCounts_melanie_v1.6.4,
+#           file = outfile,
+#           col_names = TRUE)
+
+```
+
+## Session information
+
+```{r session info}
+
+sessionInfo()
+
+```

@@ -1,0 +1,85 @@
+---
+title: "geneInfoProcessing"
+author: "Melanie Smith"
+date: "11 July 2023"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(
+    echo = TRUE,
+    message = FALSE,
+    warning = FALSE,
+    cache = FALSE,
+    fig.align = "center",
+    results = "hide"
+)
+
+```
+
+# Load required libraries
+
+```{r load Libraries}
+
+library(plyr)
+library(reshape2)
+library(dplyr)
+library(stringr)
+library(edgeR)
+library(readxl)
+library(readr)
+library(magrittr)
+library(ggplot2)
+library(ggbeeswarm)
+library(ggrepel)
+library(RColorBrewer)
+library(pheatmap)
+library(ggpubr)
+
+# set project directory
+projectDir <- "/home/smit1924/sexInformedPreeclampsia"
+gene_info_rds <- file.path(projectDir, "thesisCleanData/geneInfo.rds")
+outfile <- file.path(projectDir, "clearBoxRawData/gene_id_vs_symbol.csv")
+
+```
+
+# Import files
+
+```{r}
+
+# import the geneInfo.rds file
+
+geneInfo <- readRDS(file = gene_info_rds)
+
+gene_id_vs_symbol <- geneInfo %>% dplyr::select(ensembl_gene_id, hgnc_symbol) 
+gene_id_vs_symbol <- gene_id_vs_symbol %>% distinct(, .keep_all = TRUE)
+#Drop ones without a gene symbol - just for simplicity.
+gene_id_vs_symbol[gene_id_vs_symbol == ""] <- NA
+gene_id_vs_symbol <- gene_id_vs_symbol %>% tidyr::drop_na()
+# gene_id_vs_symbol[duplicated(gene_id_vs_symbol$hgnc_symbol), ] 
+#There are 5 genes with multiple gene IDs
+#Just pick one for each arbitrarily
+gene_id_vs_symbol <- gene_id_vs_symbol %>% group_by(hgnc_symbol) %>% slice(1)
+
+
+```
+
+## Save a clean copy of the gene ID vs gene Symbol file (.csv)
+
+```{r}
+
+# save a csv of the combined raw counts table
+# write_csv(data.frame(gene_id_vs_symbol),
+#           file = outfile,
+#           col_names = TRUE)
+
+```
+
+## Session information
+
+```{r session info}
+
+sessionInfo()
+
+```
+

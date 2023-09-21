@@ -1,0 +1,78 @@
+---
+title: "gencodev32"
+author: "Melanie Smith"
+date: "21 August 2023"
+output: html_document
+---
+
+# Load required libraries
+
+```{r load Libraries}
+
+library(plyr)
+library(reshape2)
+library(dplyr)
+library(stringr)
+library(magrittr)
+library(rtracklayer)
+
+# set project directory
+projectDir <- "/home/smit1924/sexInformedPreeclampsia"
+
+# define input files
+gencodev32_gff_inFile <- file.path(projectDir, "clearBoxRawData/gencode.v32.chr_patch_hapl_scaff.annotation.gff3")
+
+# define output files
+outfile <- file.path(projectDir, "clearBoxRawData/gencode_v32_gene_id_vs_symbol.csv")
+
+```
+
+# Import gencode V32 gff3 file
+
+```{r}
+
+# import the gencodev32_gff_inFile file
+all_gencode_v32 <- rtracklayer::import(gencodev32_gff_inFile)
+gene_data <- data.frame(ensembl_gene_id = all_gencode_v32@elementMetadata$gene_id,
+                        hgnc_symbol = all_gencode_v32@elementMetadata$gene_name
+                        )
+# we're left with multiple identical rows - lets just keep one each
+gene_id_vs_symbol <- gene_data %>% distinct(, .keep_all = TRUE)
+#Drop ones without a gene symbol - just for simplicity.
+# first add NA to any missing data
+gene_id_vs_symbol[gene_id_vs_symbol == ""] <- NA
+# then drop anything with an NA
+gene_id_vs_symbol <- gene_id_vs_symbol %>% tidyr::drop_na()
+# which genes have multiple ensembl IDs
+gene_id_vs_symbol[duplicated(gene_id_vs_symbol$hgnc_symbol), ] 
+#There are genes with multiple gene IDs
+#Just pick one for each gene based on the earliest ensembl ID
+gene_id_vs_symbol <- gene_id_vs_symbol %>%
+  group_by(hgnc_symbol) %>%
+  arrange(ensembl_gene_id) %>%
+  filter(row_number()==1) %>%
+# split the ensemble column to remove the period and number
+  tidyr::separate(., col = ensembl_gene_id, into = c("ensembl", "right")) %>%
+   dplyr::select(., -right)
+
+```
+
+## Save a clean copy of the gene ID vs gene Symbol file (.csv)
+
+```{r}
+
+# save a csv of the combined raw counts table
+# write_csv(data.frame(gene_id_vs_symbol),
+#           file = outfile,
+#           col_names = TRUE)
+
+```
+
+## Session information
+
+```{r session info}
+
+sessionInfo()
+
+```
+

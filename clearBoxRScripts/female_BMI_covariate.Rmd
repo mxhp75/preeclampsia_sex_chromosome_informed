@@ -1,0 +1,176 @@
+---
+title: "female_BMI_covariate"
+author: "Melanie Smith"
+date: "12 September 2023"
+output: html_document
+---
+# Load required libraries
+```{r load Libraries}
+library(plyr)
+library(reshape2)
+library(dplyr)
+library(stringr)
+library(edgeR)
+library(readxl)
+library(readr)
+library(magrittr)
+library(tibble)
+library(ggplot2)
+library(ggrepel)
+library(pheatmap)
+
+# set project directory
+projectDir <- "/home/smit1924/sexInformedPreeclampsia"
+# projectDir <- "/Users/pillmaka/Desktop/Melanie/drive-download"
+
+expt_name <- 'female_noCovariate'
+
+counts_geneID_file <- file.path(projectDir, "clearBoxRawData/rawCounts_melanie_v2.0.3.csv")
+
+gene_info_file <- file.path(projectDir, "clearBoxRawData/gene_id_vs_symbol.csv")
+metadata_file <- file.path(projectDir, "clearBoxRawData/cleanSampleMetadata.csv")
+
+outdir <- file.path(projectDir, paste0(expt_name, "_output"))
+
+dir.create(outdir)
+
+# set max digits
+options(digits=3)
+
+# set filtering criteria
+filterCPM <- 2
+numSamples <- 10
+
+```
+
+# Import all input data tables
+```{r}
+## Count data
+# import the count file for DE
+rawCounts <- read_csv(file = counts_geneID_file)
+
+## Metadata
+metadata <- read_csv(file = metadata_file)
+
+## Gene ID versus GeneSymbol
+gene_info <- read_csv(file = gene_info_file)
+
+## Gene ID versus GeneSymbol
+gene_info <- read_csv(file = gene_info_file)
+gene_info <- gene_info[!duplicated(gene_info$ensembl_gene_id), ]
+```
+
+# Subset to keep only female data
+```{r}
+female_metadata <- dplyr::filter(metadata, Sex == "F")
+female_counts <- rawCounts %>% dplyr::select(., Geneid, female_metadata$samplename)
+```
+
+# Establish DGElist object
+```{r}
+# drop the samples not required for this analysis
+counts <- female_counts %>%
+  tibble::column_to_rownames("Geneid")
+counts <- counts[, female_metadata$samplename]
+# drop rows with zero in all columns
+counts <- counts[rowSums(counts[])>0,] %>%
+  tibble::rownames_to_column("ensembl_gene_id")
+# put the ensemble gene IDs into column 1
+counts <- dplyr::left_join(counts, gene_info, by = "ensembl_gene_id") %>%
+  dplyr::select(., ensembl_gene_id, hgnc_symbol, everything())
+dim(counts)
+# establish the DGEList
+dge_list_obj <- DGEList(counts = counts %>% tibble::column_to_rownames("ensembl_gene_id") %>% dplyr::select(., -hgnc_symbol),
+                           samples = female_metadata,
+                           group = female_metadata$group,
+                           genes = counts %>% dplyr::select(ensembl_gene_id, hgnc_symbol))
+
+```
+
+# Filter biological noise and plot
+```{r}
+
+# new df of unfiltered cpm for the reduced DGEList
+preFilterCPM <- cpm(dge_list_obj)
+
+# remove low expressed genes (filterCPM in numSamples PE)
+keep.exprs <- rowSums(preFilterCPM > filterCPM) >= numSamples
+
+# Perform the filtering step and recalculate the TMM normalisation factors for each library.
+dge_list_obj <- dge_list_obj[keep.exprs,,keep.lib.sizes = FALSE]
+
+dim(dge_list_obj)
+
+```
+
+# TMM normalisation
+```{r}
+# calculate normalisation factors and apply to the DGEList object
+dge_list_obj <- calcNormFactors(dge_list_obj,
+                           method = "TMM")
+
+# # set the new factor levels
+outcome_levels <- c("Control", "PE")
+dge_list_obj$samples$Outcome <- factor(dge_list_obj$samples$Outcome, levels=outcome_levels)
+```
+
+# Calculate log2CPM and save table as .csv
+
+```{r}
+log2CPM <- edgeR::cpm(dge_list_obj, log = TRUE)
+
+# edgeR::cpm(dge_list_obj, log = TRUE) %>%
+#   as.data.frame() %>%
+#   tibble::rownames_to_column("ensembl") %>%
+#   write_csv(., file = output_log2CPM_file,
+#            col_names = TRUE)
+
+```
+
+# Differential Expression
+- no covariates  
+  
+```{r}
+## No covariates
+#Create and write out design matrix
+model_BMI <- '~0 + Outcome + BMI'
+# establish the design matrix
+design_PE_BMI <- model.matrix(formula(model_BMI),
+                              data = dge_list_obj$samples)
+# make the column names a little nicer
+colnames(design_PE_BMI) <- c("F_Control", "F_PE", "BMI")
+```
+
+```{r}
+# perform the voom
+voom_PE_BMI <- voom(dge_list_obj, design_PE_BMI, plot = TRUE)
+
+# fit the linear model
+fit_PE_BMI <- lmFit(voom_PE_BMI, design_PE_BMI)
+```
+
+```{r}
+# set the contrasts - this makes it easier to "see" what we're testing
+contrast_PE_BMI <- makeContrasts(female_PE = F_PE-F_Control,
+                                 levels = design_PE_BMI)
+contrast_PE_BMI
+
+# fit a linear regression to the contrast questions
+contrast_fit_PE_BMI <- contrasts.fit(fit_PE_BMI, contrast_PE_BMI)
+
+# perform bayesian adjustment
+contrast_fit_PE_BMI <- eBayes(contrast_fit_PE_BMI)
+```
+
+```{r}
+# summary table of the sex PE fit
+summary(decideTests(contrast_fit_PE_BMI,
+                    adjust.method = "fdr",
+                    p.value = 0.05))
+
+# all DE results for the female_PE comparison
+allTable_female_PE_BMI <- topTable(contrast_fit_PE_BMI,
+                             coef = 1,
+                             n = Inf,
+                             sort = "p")
+```

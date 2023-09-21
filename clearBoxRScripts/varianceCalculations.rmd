@@ -1,0 +1,167 @@
+---
+title: "clearBoxComputeVariance"
+author: "Melanie Smith"
+date: "11 August 2023"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+# Load required libraries
+```{r load Libraries}
+library(plyr)
+library(reshape2)
+library(dplyr)
+library(stringr)
+library(edgeR)
+library(readxl)
+library(readr)
+library(magrittr)
+library(tibble)
+library(ggplot2)
+library(ggrepel)
+
+# set project directory
+projectDir <- "/home/smit1924/sexInformedPreeclampsia"
+# projectDir <- "/Users/pillmaka/Desktop/Melanie/drive-download"
+
+expt_name <- 'noCovariate'
+
+# input files
+counts_log2CPM_file <- file.path(projectDir, "noCovariate_output/noCovariatelog2CPM.csv")
+
+gene_info_file <- file.path(projectDir, "clearBoxRawData/gene_id_vs_symbol.csv")
+metadata_file <- file.path(projectDir, "clearBoxRawData/cleanSampleMetadata.csv")
+male_DE_file <- file.path(outdir, paste0(expt_name, "filtered_DE.csv"))
+
+outdir <- file.path(projectDir, paste0(expt_name, "_output"))
+
+dir.create(outdir)
+
+# set max digits
+options(digits=3)
+
+# set filtering criteria
+filterCPM <- 2
+numSamples <- 5
+
+```
+
+# Import all input data tables
+```{r}
+## Count data
+# import the count file for DE
+log2CPM <- read_csv(file = counts_log2CPM_file) %>%
+    tibble::column_to_rownames("ensembl")
+
+## Metadata
+metadata <- read_csv(file = metadata_file)
+male <- dplyr::filter(metadata, Sex == "M") %>%
+  dplyr::select(., samplename)
+female <- dplyr::filter(metadata, Sex == "F") %>%
+  dplyr::select(., samplename)
+
+## Gene ID versus GeneSymbol
+gene_info <- read_csv(file = gene_info_file)
+
+## DE table
+noCovariatefiltered_DE <- read_csv(file.path = male_DE_file)
+de_hgnc_symbol <- dplyr::filter(noCovariatefiltered_DE, adj.P.Val_M < 0.02) %>%
+  dplyr::select(., hgnc_symbol)
+
+```
+
+# calculate gene wise variance
+
+```{r}
+
+# calculate the gene wise variance for all samples
+varianceCalcs <- data.frame(log2CPM) %>%
+  tibble::rownames_to_column("ensembl_gene_id") %>%
+  dplyr::left_join(., gene_info, by = "ensembl_gene_id") %>%
+  dplyr::select(., -ensembl_gene_id) %>%
+  dplyr::distinct(hgnc_symbol, .keep_all = TRUE) %>%
+  dplyr::filter(., stats::complete.cases(hgnc_symbol)) %>%
+  as.data.frame() %>%
+  tibble::column_to_rownames("hgnc_symbol") %>%
+  dplyr::mutate(., overallVariance = matrixStats::rowVars(as.matrix(.))) %>%
+  dplyr::mutate(., maleVariance = matrixStats::rowVars(as.matrix(dplyr::select(., male$samplename)))) %>%
+  dplyr::mutate(., femaleVariance = matrixStats::rowVars(as.matrix(dplyr::select(., female$samplename)))) %>%
+  dplyr::mutate(., diff = femaleVariance-maleVariance)
+  
+```
+
+# scatter plot of male and female variance
+
+```{r}
+# logged
+varianceCalcs %>%
+  ggplot(aes(x = log2(maleVariance),
+             y = log2(femaleVariance)),
+         size = 4) +
+  geom_point() +
+    # add a 45 degree line (x=y)
+  geom_abline(intercept = 0, slope = 1, size = 0.5) +
+    # set the x and y-axis limits
+  scale_x_continuous(limits = c(-7.6, 4.2)) +
+  scale_y_continuous(limits = c(-7.6, 4.2))
+
+# variance not logged
+varianceScatter <- varianceCalcs %>%
+  ggplot(aes(x = maleVariance,
+             y = femaleVariance,
+             label = rownames(varianceCalcs)),
+         size = 4) +
+  geom_point() +
+    # add a 45 degree line (x=y)
+  geom_abline(intercept = 0, slope = 1, size = 0.5) +
+    # set the x and y-axis limits
+  scale_x_continuous(limits = c(0, 17.5)) +
+  scale_y_continuous(limits = c(0, 17.5)) +
+    geom_label_repel(data = dplyr::filter(varianceCalcs, maleVariance > 5),
+                  aes(label = rownames(dplyr::filter(varianceCalcs, maleVariance > 5))),
+                  fill = "lightblue",
+                  xlim = c(9, 17.5),
+                  max.overlaps = Inf,
+                  show.legend = FALSE) +
+    geom_label_repel(data = dplyr::filter(varianceCalcs, femaleVariance > 5),
+                  aes(label = rownames(dplyr::filter(varianceCalcs, femaleVariance > 5))),
+                  fill = "hotpink",
+                  xlim = c(0, 9),
+                  max.overlaps = Inf,
+                  show.legend = FALSE)
+ggsave(plot = varianceScatter,
+       filename = file.path(projectDir, "plots/geneWiseVariance.png"),
+       units = "in",
+       width = 12,
+       height = 12,
+       dpi = 150)
+
+## variance plot with DE genes highlighted
+varianceScatter_de <- varianceCalcs %>%
+  ggplot(aes(x = maleVariance,
+             y = femaleVariance,
+             label = rownames(varianceCalcs)),
+         size = 4) +
+  geom_point() +
+    # add a 45 degree line (x=y)
+  geom_abline(intercept = 0, slope = 1, size = 0.5) +
+    # set the x and y-axis limits
+  scale_x_continuous(limits = c(0, 17.5)) +
+  scale_y_continuous(limits = c(0, 17.5)) +
+    geom_label_repel(data = subset(varianceCalcs, rownames(varianceCalcs) %in% de_hgnc_symbol$hgnc_symbol),
+                  aes(label = rownames(subset(varianceCalcs, rownames(varianceCalcs) %in% de_hgnc_symbol$hgnc_symbol))),
+                  fill = "orange",
+                  xlim = c(0, 17.5),
+                  max.overlaps = Inf,
+                  show.legend = FALSE)
+ggsave(plot = varianceScatter_de,
+       filename = file.path(projectDir, "plots/geneWiseVariance_de.png"),
+       units = "in",
+       width = 12,
+       height = 12,
+       dpi = 150)
+
+```

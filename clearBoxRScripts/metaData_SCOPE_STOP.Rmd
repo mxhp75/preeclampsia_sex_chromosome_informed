@@ -1,0 +1,245 @@
+---
+title: "metaDataAllScopeStop"
+author: "Melanie Smith"
+date: "13 September 2023"
+output: html_document
+---
+
+# Load required libraries
+```{r load Libraries}
+library(plyr)
+library(reshape2)
+library(dplyr)
+library(stringr)
+library(edgeR)
+library(readxl)
+library(readr)
+library(magrittr)
+library(tibble)
+library(ggplot2)
+library(ggrepel)
+library(pheatmap)
+
+# set project directory
+projectDir <- "/home/smit1924/sexInformedPreeclampsia"
+dataFolder <- "/home/smit1924/dataFolder"
+
+expt_name <- 'metaData_SCOPE_STOP'
+
+SCOPE_dataDictionary_file <- file.path(dataFolder,"Data_dictionary_FINAL_DISTR_updated_130215_biomarker_SNP.xlsx")
+SCOPE_raw_file <- file.path(dataFolder,"SCOPE_full_raw_20141201.rds")
+STOP_raw_dat_file <- file.path(dataFolder,"STOPStudy_DATA_2021-04-23_1151.csv")
+STOP_raw_dict_file <- file.path(dataFolder,"STOPStudy_DataDictionary_2021-04-23.csv")
+SCOPE_STOP_BWcentile_metab_file <- file.path(dataFolder, "SCOPE_STOP_BWcentile_metab.csv")
+
+outdir <- file.path(projectDir, paste0(expt_name, "_output"))
+
+dir.create(outdir)
+
+# REDCap import
+source(file.path(dataFolder, "/redcap_api_import.R"))
+
+```
+
+# Import SCOPE
+```{r}
+# make a vector of interesting variables
+SCOPE_variables <- c("f7_pco", "f7_if_pco_tx_conception",
+                     "f6c_mat_sga_status", "f3_low_dose_aspirin",
+                     "f6_partcpt_bwgt", "f6c_partcpt_bwgt_gp",
+                     "f6_partnr_bwgt", "f6c_partnr_bwgt_gp",
+                     "f8_mother_pih", "f8c_mother_any_pih",
+                     "f8c_any_sis_any_pih", "f8c_fh_pih",
+                     "f8c_mother_any_pet", "f8c_mother_any_ch",
+                     "f8c_mother_any_ihd", "f8c_father_any_ch",
+                     "f8c_father_any_ihd", "f8c_father_metabolic_hx",
+                     "f11c_Gest", "f11_2nd_sbp",
+                     "f11_2nd_dbp", "f11c_1st_vst_map_2nd",
+                     "f11c_chronic_ht", "f11_wgt",
+                     "f11_bmi", "f11_hgt",
+                     "f11_waist", "f11_hip",
+                     "f11_random_glucose", "f15_booking_hb",
+                     "f15_booking_hct","f15_booking_plt",
+                     "f15_ferritin", "f15_prot_creat_ratio_mmol",
+                     "f20_2nd_sbp", "f20_2nd_dbp",
+                     "f20c_2nd_vst_map_2nd", "f20_random_glucose",
+                     "f23c_dopplers_20w_gest", "f23_20w_umbri",
+                     "f7_anaemia", "f20_wgt",
+                     "f14_age", "bb_chol",
+                     "f34_pet", "f34c_gest_diag_pet",
+                     "f26_Sex", "f1_age", "f39c_final_del_gest", "f26_Birthwgt")
+
+# import SCOPE full data dictionary
+SCOPE_dataDictionary <- read_excel(SCOPE_dataDictionary_file,
+                                   sheet = "Stage 1 Data") %>%
+  as.data.frame()
+# filter
+filter_SCOPE_dataDictionary <- subset(SCOPE_dataDictionary, Variable_SAS_name %in% SCOPE_variables)
+
+# import the full SCOPE metadata file
+SCOPE_raw <- readRDS(SCOPE_raw_file)
+
+# subset to the required columns
+subsetSCOPE <- dplyr::select(SCOPE_raw,
+                             regid, centre, all_of(SCOPE_variables)) %>% 
+  # remove all centres except Adelaide
+  dplyr::filter(., centre == "Adelaide University") %>% 
+    # sort by ID
+  dplyr::arrange(., regid) %>% 
+  # add a samplename column that matches the rest of my data
+  dplyr::mutate(., samplename = paste0("SCP", stringr::str_pad(regid, width=4, pad="0"))) %>%
+  # make samplename the first column and drop column 'centre'
+  dplyr::select(., samplename, everything(), -centre) %>% 
+  # replace all the missing data codes with NA
+  mutate(across(everything(), function(x){replace(x, which(x<0), NA)}))
+head(subsetSCOPE)
+dim(subsetSCOPE)
+
+subsetSCOPE %<>% dplyr::mutate(., WHR = f11_waist/f11_hip) %>% 
+  dplyr::mutate(., WHR_cat = ifelse(WHR <= 0.8, "Low",
+                                    ifelse(WHR > .80 & WHR <= .85, 
+                                           "Moderate", "High"))
+                )
+subsetSCOPE %<>% dplyr::mutate(., HiWR = f11_hgt/f11_waist)
+```
+
+# Import STOP
+
+```{r import STOP}
+
+# variables I want
+STOP_variables <- c("participant_id", 
+                     "f1_age",
+                     "f5_pco", "f5_pco_conception",
+                     "f5_bwgt","f5_partner_bwgt",
+                     "f6_mother_misc", "f6_sister_misc",
+                     "f6_mother_pih", "f6_sister_pih",
+                     "f6_mother_pe", "f6_mother_ihd", 
+                     "f6_father_ihd",
+                     "f7_anaemia_yr",  "f7_anaemia_med",
+                     "f9_wgt", "f9_bmi",
+                     "f9_hgt", "f9_waist",
+                     "f9_hip", "f9_sbp", 
+                     "f9_dbp", "uscom1a_12w_map2",
+                     "f9_blood_date_hb", "f9_haematocrit",
+                     "f9_platelets", "f9_ferritin",
+                     "f9_blood_date_ferritin", "f9_prot_creat_ratio",
+                     "f9_blood_date_prot", "f9_hb",
+                     "f11_age", "f11_cig_1st_trim",
+                     "f13_glucose_booking", "f13_glucose_gestw", 
+                     "f22_sex", "f22_gestw_del",
+                     "f22_birthwgt",
+                     "f29_doppler", "f29_doppler_2", 
+                     "f29_dopp_1_umbri", "f29_dopp_2_umbri")
+
+# STOP (REDCap import)
+STOP_raw_dat <- read.csv(file.path(
+  dataFolder,"STOPStudy_DATA_2021-04-23_1151.csv"
+  ),
+                         header = TRUE)
+STOP_raw_dict <- read.csv(file.path(
+  dataFolder,"STOPStudy_DataDictionary_2021-04-23.csv"
+  ),
+                          header = TRUE)
+
+STOP_raw <- apply_data_dict(STOP_raw_dat,STOP_raw_dict)
+table(STOP_raw$final_data) #use final data subset (N=1300) only
+
+# subset for the variables we want
+subsetSTOP <- dplyr::select(STOP_raw, final_data, all_of(STOP_variables)) %>%
+  # drop samples not in the final data subset
+  dplyr::filter(., final_data == "Yes") %>% 
+  # sort by ID
+  dplyr::arrange(., participant_id) %>% 
+  # add a samplename column that matches the rest of my data
+  dplyr::mutate(., samplename = paste0(
+    "STP", stringr::str_pad(participant_id, width = 4, pad = "0"))
+    ) %>%
+  # make samplename the first column
+  dplyr::select(., samplename, everything())
+
+# writexl::write_xlsx(as.data.frame(subsetSTOP), "~/Desktop/20230303_stopVariables.xls")
+
+# lets add some new columns
+# 1. waist to hip ratio
+
+subsetSTOP %<>% dplyr::mutate(., WHR = f9_waist/f9_hip) %>% 
+  dplyr::mutate(., WHR_cat = ifelse(WHR <= 0.8, "Low",
+                                    ifelse(WHR > .80 & WHR <= .85, 
+                                           "Moderate", "High"))
+                )
+# convert STOP height to m
+subsetSTOP$f9_hgt <- subsetSTOP$f9_hgt*100
+subsetSTOP %<>% dplyr::mutate(., HiWR = f9_hgt/f9_waist)
+```
+
+## Combine SCOPE and STOP
+
+```{r combine scope and stop}
+
+combinedMetaData <- data.frame(samplename = c(subsetSCOPE[,"samplename"], subsetSTOP[,"samplename"]),
+                               cohort = c(rep("SCOPE", nrow(subsetSCOPE)), rep("STOP", nrow(subsetSTOP))),
+                               gestationDelivery = c(subsetSCOPE[,"f39c_final_del_gest"], subsetSTOP[,"f22_gestw_del"]),
+                               neonatalSexNumeric = c(subsetSCOPE[, "f26_Sex"], subsetSTOP[, "f22_sex"]),
+                               neonatalBirthweight = c(subsetSCOPE[, "f26_Birthwgt"], subsetSTOP[, "f22_birthwgt"]),
+                               pcos = c(subsetSCOPE[, "f7_pco"], subsetSTOP[, "f5_pco"]),
+                               maternalBirthWgt = c(subsetSCOPE[, "f6_partcpt_bwgt"], subsetSTOP[, "f5_bwgt"]),
+                               paternalBirthWgt = c(subsetSCOPE[, "f6_partnr_bwgt"], subsetSTOP[, "f5_partner_bwgt"]),
+                               maternalWaist = c(subsetSCOPE[, "f11_waist"], subsetSTOP[, "f9_waist"]),
+                               maternalHip = c(subsetSCOPE[, "f11_hip"], subsetSTOP[, "f9_hip"]),
+                               maternalBMI = c(subsetSCOPE[, "f11_bmi"], subsetSTOP[, "f9_bmi"]),
+                               maternalWgt = c(subsetSCOPE[, "f11_wgt"], subsetSTOP[, "f9_wgt"]),
+                               maternalHgt = c(subsetSCOPE[, "f11_hgt"], subsetSTOP[, "f9_hgt"]),
+                               maternalAge = c(subsetSCOPE[, "f1_age"], subsetSTOP[, "f1_age"]),
+                               maternalWHR = c(subsetSCOPE[, "WHR"], subsetSTOP[, "WHR"]),
+                               maternalWHR_cat = c(subsetSCOPE[, "WHR_cat"], subsetSTOP[, "WHR_cat"]),
+                               maternalHiWR = c(subsetSCOPE[, "HiWR"], subsetSTOP[, "HiWR"]),
+                               map = c(subsetSCOPE[, "f11c_1st_vst_map_2nd"], subsetSTOP[, "uscom1a_12w_map2"]),
+                               sbp = c(subsetSCOPE[, "f11_2nd_sbp"], subsetSTOP[, "f9_sbp"]),
+                               dbp = c(subsetSCOPE[, "f11_2nd_dbp"], subsetSTOP[, "f9_dbp"])) %>% 
+  dplyr::mutate(., neonatalSex = ifelse(neonatalSexNumeric == 1, "male",
+                                     ifelse(neonatalSexNumeric == 2, "female", NA)))
+
+
+```
+
+```{r}
+# Add the metabolic syndrome and custom birth centile data
+SCOPE_STOP_BWcentile_metab <- read_csv(SCOPE_STOP_BWcentile_metab_file)
+
+# Add the samplename to match the rest of the metadata
+SCOPE_STOP_BWcentile_metab %<>% dplyr::mutate(., 
+                                              samplename = ifelse(
+                                                Study == "SCOPE", paste0("SCP", stringr::str_pad(Study.ID, width = 4, pad = "0")),
+                                                ifelse(Study == "STOP", paste0("STP", stringr::str_pad(Study.ID, width = 4, pad = "0")), NA)
+                                                )
+                                              )
+```
+
+# Combine metadata and metabolic syndrome data
+```{r}
+combinedMetaData <- left_join(combinedMetaData, SCOPE_STOP_BWcentile_metab, by = "samplename") %>%
+  dplyr::select(-Study)
+
+## set the new factor levels
+WHR_levels <- c("Low", "Moderate", "High")
+combinedMetaData$maternalWHR_cat <- factor(combinedMetaData$maternalWHR_cat, levels=WHR_levels)
+
+# saveRDS(combinedMetaData, file.path(dataFolder, "combinedMetaData.rds"))
+```
+
+## Make some plots
+```{r}
+combinedMetaData %>%
+  ggplot(aes(x = maternalWaist,
+             y = maternalBMI,
+             colour = maternalWHR_cat)) +
+  geom_point()
+
+combinedMetaData %>%
+  ggplot(aes(x = pcos,
+             y = maternalHiWR,
+             colour = metab.C1)) +
+  geom_boxplot()
+```
+

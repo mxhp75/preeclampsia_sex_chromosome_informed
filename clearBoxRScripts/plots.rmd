@@ -1,0 +1,260 @@
+---
+title: "plots, lots of plots"
+author: "Melanie Smith"
+date: "12 July 2023"
+output: html_document
+---
+
+# Load required libraries
+```{r load Libraries}
+library(plyr)
+library(reshape2)
+library(dplyr)
+library(tidyr)
+library(stringr)
+library(edgeR)
+library(readxl)
+library(readr)
+library(magrittr)
+library(ggplot2)
+library(tibble)
+# library(ggbeeswarm)
+# library(ggrepel)
+# library(RColorBrewer)
+# library(pheatmap)
+# library(ggpubr)
+
+# set project directory
+projectDir <- "/home/smit1924/sexInformedPreeclampsia"
+# projectDir <- "/Users/pillmaka/Desktop/Melanie/drive-download"
+
+# define input files
+jimmy_v1_6_4_inFile <- file.path(projectDir, "jimmy_output/jimmy_DE.csv")
+melanie_v1_6_4_inFile <- file.path(projectDir, "melanie_v1_6_4_output/melanie_v1_6_4_DE.csv")
+melanie_v2_0_3_inFile <- file.path(projectDir, "melanie_v2_0_3_output/melanie_v2_0_3_DE.csv")
+
+jimmy_v1_6_4_filtered_inFile <- file.path(projectDir, "jimmy_output/jimmyfiltered_DE.csv")
+melanie_v1_6_4_filtered_inFile <- file.path(projectDir, "melanie_v1_6_4_output/melanie_v1_6_4filtered_DE.csv")
+melanie_v2_0_3_filtered_inFile <- file.path(projectDir, "melanie_v2_0_3_output/melanie_v2_0_3filtered_DE.csv")
+ 
+```
+
+# Import DE files
+
+```{r}
+jimmy_v1_6_4 <- read_csv(file = jimmy_v1_6_4_inFile)
+melanie_v1_6_4 <- read_csv(file = melanie_v1_6_4_inFile)
+melanie_v2_0_3 <- read_csv(file = melanie_v2_0_3_inFile)
+
+jimmy_v1_6_4_filtered <- read_csv(file = jimmy_v1_6_4_filtered_inFile)
+melanie_v1_6_4_filtered <- read_csv(file = melanie_v1_6_4_filtered_inFile)
+melanie_v2_0_3_filtered <- read_csv(file = melanie_v2_0_3_filtered_inFile)
+
+```
+
+# Combine the tables (logFC only)
+
+```{r}
+# DE using subset counts
+combinedLogFC <- dplyr::full_join(jimmy_v1_6_4 %>% dplyr::select(ensembl_gene_id, hgnc_symbol, logFC_F, logFC_M),
+                                  melanie_v1_6_4 %>% dplyr::select(ensembl_gene_id, hgnc_symbol, logFC_F, logFC_M),
+                                  by=c('hgnc_symbol', 'ensembl_gene_id'),
+                                  suffix=c("_j164", "_m164")) %>%
+  dplyr::full_join(., melanie_v2_0_3 %>% dplyr::select(ensembl_gene_id, hgnc_symbol, logFC_F_m203 = logFC_F, logFC_M_m203 = logFC_M),
+                   by=c('hgnc_symbol', 'ensembl_gene_id'))
+# DE using filtered counts (2CPM in 5 samples)
+combined_filteredLogFC <- dplyr::full_join(jimmy_v1_6_4_filtered %>% dplyr::select(ensembl_gene_id, hgnc_symbol, logFC_F, logFC_M),
+                                  melanie_v1_6_4_filtered %>% dplyr::select(ensembl_gene_id, hgnc_symbol, logFC_F, logFC_M),
+                                  by=c('hgnc_symbol', 'ensembl_gene_id'),
+                                  suffix=c("_j164", "_m164")) %>%
+  dplyr::full_join(., melanie_v2_0_3_filtered %>% dplyr::select(ensembl_gene_id, hgnc_symbol, logFC_F_m203 = logFC_F, logFC_M_m203 = logFC_M),
+                   by=c('hgnc_symbol', 'ensembl_gene_id'))
+```
+
+# Combine subset and filtered tables
+
+```{r}
+# combine the subset and filtered tables
+logFC_subset_filtered <- dplyr::full_join(combinedLogFC, combined_filteredLogFC,
+                                          by = c("hgnc_symbol", "ensembl_gene_id"),
+                                          suffix = c("_subset", "_filtered")) %>%
+  # replace NA with zero
+  dplyr::mutate_at(c(3:14), ~replace_na(.,0))
+
+```
+
+# plot subset DE
+## Male and female logFC compared (internally)
+
+```{r}
+# jimmy_v1_6_4 male vs female
+ggplot(data = jimmy_v1_6_4,
+       aes(x = logFC_M,
+           y = logFC_F)) +
+  geom_point()
+# melanie_v1_6_4 male vs female
+ggplot(data = melanie_v1_6_4,
+       aes(x = logFC_M,
+           y = logFC_F)) +
+  geom_point()
+  # melanie_v2_0_3 male vs female
+ggplot(data = melanie_v2_0_3,
+       aes(x = logFC_M,
+           y = logFC_F)) +
+  geom_point()
+```
+
+## Jimmy & Melanie v1.6.4 logFC compared
+
+```{r}
+# v1_6_4 male
+ggplot(data = combinedLogFC,
+       aes(x = logFC_M_j164,
+           y = logFC_M_m164)) +
+  geom_point() +
+  ggtitle("Male log2FC Comparison (Jimmy v1.6.4 versus Melanie v1.6.4)")
+# v1_6_4 female
+ggplot(data = combinedLogFC,
+       aes(x = logFC_F_j164,
+           y = logFC_F_m164)) +
+  geom_point() +
+  ggtitle("Female log2FC Comparison (Jimmy v1.6.4 versus Melanie v1.6.4)")
+```
+
+## Jimmy v1.6.4 & Melanie v2.0.3 logFC compared
+
+```{r}
+# Jimmy v1_6_4 Melanie v2.0.3 male
+ggplot(data = combinedLogFC,
+       aes(x = logFC_M_j164,
+           y = logFC_M_m203)) +
+  geom_point() +
+  ggtitle("Male log2FC Comparison (Jimmy v1.6.4 versus Melanie v2.0.3)")
+# Jimmy v1_6_4 Melanie v2.0.3 female
+ggplot(data = combinedLogFC,
+       aes(x = logFC_F_j164,
+           y = logFC_F_m203)) +
+  geom_point() +
+  ggtitle("Female log2FC Comparison (Jimmy v1.6.4 versus Melanie v2.0.3)")
+```
+
+## Melanie v1.6.4 & Melanie v2.0.3 logFC compared
+
+```{r}
+# Melanie v1_6_4 Melanie v2.0.3 male
+ggplot(data = combinedLogFC,
+       aes(x = logFC_M_m164,
+           y = logFC_M_m203)) +
+  geom_point() +
+  ggtitle("Male log2FC Comparison (Melanie v1.6.4 versus Melanie v2.0.3)")
+# Melanie v1_6_4 Melanie v2.0.3 female
+ggplot(data = combinedLogFC,
+       aes(x = logFC_F_m164,
+           y = logFC_F_m203)) +
+  geom_point() +
+  ggtitle("Female log2FC Comparison (Melanie v1.6.4 versus Melanie v2.0.3)")
+```
+
+# Plot filtered DE 
+## Jimmy & Melanie v1.6.4 logFC compared
+
+```{r}
+# v1_6_4 male
+ggplot(data = combined_filteredLogFC,
+       aes(x = logFC_M_j164,
+           y = logFC_M_m164)) +
+  geom_point() +
+  ggtitle("Male (filtered) log2FC Comparison (Jimmy v1.6.4 versus Melanie v1.6.4)")
+# v1_6_4 female
+ggplot(data = combined_filteredLogFC,
+       aes(x = logFC_F_j164,
+           y = logFC_F_m164)) +
+  geom_point() +
+  ggtitle("Female (filtered) log2FC Comparison (Jimmy v1.6.4 versus Melanie v1.6.4)")
+```
+
+## Jimmy v1.6.4 & Melanie v2.0.3 logFC compared
+
+```{r}
+# Jimmy v1_6_4 Melanie v2.0.3 male
+ggplot(data = combined_filteredLogFC,
+       aes(x = logFC_M_j164,
+           y = logFC_M_m203)) +
+  geom_point() +
+  ggtitle("Male (filtered) log2FC Comparison (Jimmy v1.6.4 versus Melanie v2.0.3)")
+# Jimmy v1_6_4 Melanie v2.0.3 female
+ggplot(data = combined_filteredLogFC,
+       aes(x = logFC_F_j164,
+           y = logFC_F_m203)) +
+  geom_point() +
+  ggtitle("Female (filtered) log2FC Comparison (Jimmy v1.6.4 versus Melanie v2.0.3)")
+```
+
+## Melanie v1.6.4 & Melanie v2.0.3 logFC compared
+
+```{r}
+# Melanie v1_6_4 Melanie v2.0.3 male
+ggplot(data = combined_filteredLogFC,
+       aes(x = logFC_M_m164,
+           y = logFC_M_m203)) +
+  geom_point() +
+  ggtitle("Male (filtered) log2FC Comparison (Melanie v1.6.4 versus Melanie v2.0.3)")
+# Melanie v1_6_4 Melanie v2.0.3 female
+ggplot(data = combined_filteredLogFC,
+       aes(x = logFC_F_m164,
+           y = logFC_F_m203)) +
+  geom_point() +
+  ggtitle("Female (filtered) log2FC Comparison (Melanie v1.6.4 versus Melanie v2.0.3)")
+```
+
+# Plot subset and filtered DE 
+## Jimmy v1.6.4 subset and filtered logFC compared
+
+```{r}
+# Jimmy v1_6_4 male
+ggplot(data = logFC_subset_filtered,
+       aes(x = logFC_M_j164_subset,
+           y = logFC_M_j164_filtered)) +
+  geom_point() +
+  ggtitle("Male (subset v filtered) log2FC Comparison (Jimmy v1.6.4)")
+# Jimmy v1_6_4 female
+ggplot(data = logFC_subset_filtered,
+       aes(x = logFC_F_j164_subset,
+           y = logFC_F_j164_filtered)) +
+  geom_point() +
+  ggtitle("Female (subset v filtered) log2FC Comparison (Jimmy v1.6.4)")
+```
+
+## Melanie v1.6.4 subset and filtered logFC compared
+
+```{r}
+# Melanie v1_6_4 male
+ggplot(data = logFC_subset_filtered,
+       aes(x = logFC_M_m164_subset,
+           y = logFC_M_m164_filtered)) +
+  geom_point() +
+  ggtitle("Male (subset v filtered) log2FC Comparison (Melanie v1.6.4)")
+# Melanie v1_6_4 female
+ggplot(data = logFC_subset_filtered,
+       aes(x = logFC_F_m164_subset,
+           y = logFC_F_m164_filtered)) +
+  geom_point() +
+  ggtitle("Female (subset v filtered) log2FC Comparison (Melanie v1.6.4)")
+```
+
+## Melanie v2.0.3 subset and filtered logFC compared
+
+```{r}
+# Melanie v2_0_3 male
+ggplot(data = logFC_subset_filtered,
+       aes(x = logFC_M_m203_subset,
+           y = logFC_M_m203_filtered)) +
+  geom_point() +
+  ggtitle("Male (subset v filtered) log2FC Comparison (Melanie v2_0_3)")
+# Melanie v2_0_3 female
+ggplot(data = logFC_subset_filtered,
+       aes(x = logFC_F_m203_subset,
+           y = logFC_F_m203_filtered)) +
+  geom_point() +
+  ggtitle("Female (subset v filtered) log2FC Comparison (Melanie v2_0_3)")
+```

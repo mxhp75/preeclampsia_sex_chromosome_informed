@@ -1,0 +1,71 @@
+---
+title: "subsetGeneList"
+author: "Melanie Smith"
+date: "11 July 2023"
+output: html_document
+---
+
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(
+    echo = TRUE,
+    message = FALSE,
+    warning = FALSE,
+    cache = FALSE,
+    fig.align = "center",
+    results = "hide"
+)
+
+```
+
+# Load required libraries
+
+```{r load Libraries}
+
+library(plyr)
+library(reshape2)
+library(dplyr)
+library(stringr)
+library(edgeR)
+library(readxl)
+library(readr)
+library(magrittr)
+library(ggplot2)
+library(ggbeeswarm)
+library(ggrepel)
+library(RColorBrewer)
+library(pheatmap)
+library(ggpubr)
+
+# set project directory
+projectDir <- "/home/smit1924/sexInformedPreeclampsia"
+inputAllTable <- file.path(projectDir, "thesisCleanData/allTable_male_PE.csv")
+outfile <- file.path(projectDir, "clearBoxRawData/subsetGeneList.csv")
+
+```
+
+# Import files
+
+```{r}
+
+# import the geneInfo.rds file
+
+allTable <- read_csv(file = inputAllTable) %>%
+  as.data.frame() %>%
+  dplyr::select(., Geneid = ensembl,
+                hgnc_symbol = gene_name)
+
+
+
+```
+
+## Save a clean copy of the subset gene list (.csv)
+
+```{r}
+
+# save a csv of the gene set from my thesis DE
+# write_csv(data.frame(allTable),
+#           file = outfile,
+#           col_names = TRUE)
+
+```
