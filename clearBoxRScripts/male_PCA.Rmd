@@ -1,0 +1,462 @@
+---
+title: "male_rawCounts_QC_PCA"
+author: "Melanie Smith"
+date: "20 June 2023"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(
+    echo = TRUE,
+    message = FALSE,
+    warning = FALSE,
+    cache = FALSE,
+    fig.align = "center",
+    results = "hide"
+)
+
+```
+
+# Load required libraries
+
+```{r}
+library(plyr)
+library(reshape2)
+library(dplyr)
+library(stringr)
+library(edgeR)
+library(readxl)
+library(readr)
+library(magrittr)
+library(FactoMineR)
+library(factoextra)
+library(corrplot)
+
+
+# set project directory
+projectDir <- "/home/smit1924/sexInformedPreeclampsia"
+# projectDir <- "/Users/pillmaka/Desktop/Melanie/drive-download"
+
+expt_name <- "PCA"
+
+log2CPM_infile <- file.path(projectDir, "/melanie_v2_0_3_output/melanie_v2_0_3logCPM.csv")
+metadata_infile <- file.path(projectDir, "clearBoxRawData/cleanSampleMetadata.csv")
+gene_info_file <- file.path(projectDir, "clearBoxRawData/gene_id_vs_symbol.csv")  
+
+outdir <- file.path(projectDir, paste0(expt_name, "_output"))
+# output_spreadsheet_file <- file.path(outdir, paste0(expt_name, "_.csv"))
+
+dir.create(outdir)
+
+```
+
+## Data File Import
+### Import log2CPM counts
+
+```{r}
+# import the counts table
+log2CPM <- read_csv(file = log2CPM_infile) %>%
+  as.data.frame() %>%
+  tibble::column_to_rownames("ensembl_gene_id")
+dim(log2CPM)
+```
+
+### Import metadata
+
+```{r}
+# import the metadata table
+metadata <- read_csv(file = metadata_infile) %>%
+  as.data.frame()
+dim(metadata)
+
+# ggplot(metadata_males, aes(x = Outcome, y = BMI, fill = Outcome)) + geom_boxplot() +
+#   geom_point(position=position_jitterdodge())
+```
+
+### Import gene information
+
+```{r}
+## Gene ID versus GeneSymbol
+gene_info <- read_csv(file = gene_info_file)
+```
+
+### subset counts and metadata
+
+```{r}
+# subset to only keep male data
+metadata_males <- dplyr::filter(metadata, Sex == "M")
+log2CPM_males <- dplyr::select(log2CPM, metadata_males$samplename)
+```
+
+### Drop least variable genes
+This step allows me to see which genes are the most variable between all of my samples
+I will subset the top 1000 most variable genes based on both I90PR (10-90) and IQR (25-75).  
+First we calculate the interdecile range and plot the log2 gene expression of the top 1000 variable genes  
+
+```{r}
+
+#Select most variable genes
+percentile_data <- apply(as.matrix(log2CPM_males), 1, quantile, c(0, .1, .25, .5, .75, .9, 1))
+percentile_data[, 1:5]
+
+# calculate the interdecile range
+# These data represent the range of expression values between he lower and upper 10% of the distribution for each gene
+I90PR <- percentile_data["90%", ] - percentile_data["10%", ]
+
+gene_i90pr <- sort(I90PR, decreasing=TRUE)
+# and top 5000 genes were selected.
+top_genes <- names(gene_i90pr[1:1000])
+
+top_genes_i90pr <- log2CPM_males %>%
+  as.data.frame() %>% 
+  tibble::rownames_to_column(var = 'gene') %>%
+  dplyr::filter(gene %in% top_genes) %>%
+  tibble::column_to_rownames(var = 'gene') %>%
+  as.matrix()
+
+heatmap_df_i90pr <- t(scale(t(top_genes_i90pr),
+                      center = TRUE,
+                      scale = TRUE))
+
+
+# set up the column annotations
+col_anno <- data.frame(metadata_males) %>% 
+  dplyr::select(., samplename, Outcome, cohort, SmokingStatus) %>%
+  tibble::column_to_rownames("samplename")
+
+
+par(mar=c(6,2,2,1)+0.1) 
+# png(filename=file.path(paste0(outdir, '/heatmap_i90pr_CPM.png')), width=800, height=1000)
+pheatmap::pheatmap(heatmap_df_i90pr,
+                   annotation_col = col_anno,
+                   show_rownames = FALSE,
+                   scale = "none",
+                   cluster_rows = TRUE,
+                   cluster_cols = TRUE,
+                   main = "i90pr male")
+# graphics.off()
+```
+
+
+```{r}
+
+# calculate the interquartile range
+# These data represent the range of expression values between he lower and upper 25% of the distribution of genes
+IQR <- percentile_data["75%", ] - percentile_data["25%", ]
+# sort highest to lowest expression
+gene_iqr <- sort(IQR, decreasing = TRUE)
+# and top 1000 genes were selected.
+top_genes_iqr <- names(gene_iqr[1:1000])
+ 
+top_genes_df_iqr <- log2CPM_males %>%
+  as.data.frame() %>% 
+  tibble::rownames_to_column(var = 'gene') %>%
+  dplyr::filter(gene %in% top_genes_iqr) %>%
+  tibble::column_to_rownames(var = 'gene') %>%
+  as.matrix()
+
+heatmap_df_iqr <- t(scale(t(top_genes_df_iqr),
+                      center=TRUE,
+                      scale=TRUE))
+
+# plot the heatmap
+par(mar=c(6,2,2,1)+0.1) 
+# png(filename=file.path(paste0(outdir, '/heatmap_iqr_CPM.png')), width=800, height=1000)
+pheatmap::pheatmap(heatmap_df_iqr,
+                   annotation_col = col_anno,
+                   show_rownames = FALSE,
+                   scale = "none",
+                   cluster_rows = TRUE,
+                   cluster_cols = TRUE,
+                   main = "iqr male")
+# graphics.off()
+
+```
+
+### PCA
+Lets take a look at the top 2000 genes (IQR) in a PCA.  
+
+```{r}
+
+# vector of top 2000 genes in the IQR
+top_2000_genes_iqr <- names(gene_iqr[1:2000])
+
+scaled_log2CPM_male <- t(scale(t(log2CPM_males),
+                      center = TRUE,
+                      scale = TRUE))
+
+# PCA with top 5000 genes, all male samples
+res_2000_iqr <- FactoMineR::PCA(
+  scaled_log2CPM_male %>%
+    as.data.frame() %>%
+    tibble::rownames_to_column(var='gene') %>%
+    dplyr::filter(gene %in% top_2000_genes_iqr) %>%
+    tibble::column_to_rownames(var='gene') %>%
+    as.matrix() %>%
+    t(),
+  ncp = 50,
+  graph = FALSE
+)
+
+print(res_2000_iqr)
+
+# print summary of results
+summary(res_2000_iqr,
+        nbelements = Inf)
+
+# add the supplementary variables to the logged counts table
+lcpm_supp_male <- scaled_log2CPM_male %>%
+    as.data.frame() %>%
+    tibble::rownames_to_column(var='gene') %>%
+  # keep only top 2000 genes
+    dplyr::filter(gene %in% top_2000_genes_iqr) %>%
+    tibble::column_to_rownames(var='gene') %>%
+    as.matrix() %>%
+    t() %>%
+  as.data.frame() %>%
+  tibble::rownames_to_column("samplename") %>%
+  # add the supplementary variables
+  dplyr::left_join(., dplyr::select(metadata_males, samplename, GestationalAge, maternalAge, BMI, Birthweight,
+                                    cohort, Outcome, Ethnicity, SmokingStatus),
+                   by = "samplename") %>%
+  # move samplename back into the rownames
+  tibble::column_to_rownames("samplename")
+
+# PCA with top 2000 genes, all samples and added supp variables
+res_supp <- FactoMineR::PCA(lcpm_supp_male,
+                            # add columns for quantitative variables
+                            quanti.sup = 2001:2004,
+                            # add columns for qualitative variables
+                            quali.sup = 2005:2008,
+                            ncp = 50,
+                            graph = FALSE)
+# print summary of results for all individuals
+summary(res_supp, nbelements = Inf)
+
+# description of the dimensions. Measures the correlation (R2 value) between each variable and the dimension listed. By default only correlations not equal to zero are shown. Default p-value < 0.05.
+dimdesc(res_supp)
+
+# plot PCA for indivuals
+plot(res_supp,
+     cex = 0.8,
+     invisible = "quali",
+     title = "Individuals PCA Graph")
+ 
+plot(res_supp,
+     cex = 0.8,
+     habillage = "cohort")
+
+# plot PCA with 95% confidence elipse
+# png(filename=file.path(paste0(outdir, '/plotellipses_2000_iqr.png')), width=1000, height=800)
+plotellipses(res_supp,
+             axes = c(1, 2))
+# graphics.off()
+
+# plot PCA with 95% confidence elipse
+# png(filename=file.path(paste0(outdir, '/plotellipses_2000_iqr_dim2_3.png')), width=1000, height=800)
+plotellipses(res_supp,
+             axes = c(2, 3))
+# graphics.off()
+# plot PCA with 95% confidence elipse
+# png(filename=file.path(paste0(outdir, '/plotellipses_2000_iqr_dim3_4.png')), width=1000, height=800)
+plotellipses(res_supp,
+             axes = c(3, 4))
+# graphics.off()
+```
+
+**Observation**: PE:Control seems to sit between Dim 1 and Dim 2.  
+**Observation**: Cohort sit on Dim 1.  
+**Observation**: Ethnicity sits on Dim 2 however, there is only one woman with Asian ethnicity so we can’t estimate the effect of ethnicity.  
+**Observation**: Note that there are only two smokers - not much we can do with that.
+**Observation**: Outlier samples seem to be even more extreme on the deepter PCs.  
+
+```{r, echo = FALSE}
+
+# fviz_pca_biplot(res_supp, 
+#   habillage = "Outcome",
+#   addEllipses = TRUE,
+#   col.var = "red",
+#   alpha.var ="cos2",
+#   label = "var",
+#   title = "PCA - Biplot - IQR 2000") +
+#   scale_color_brewer(palette="Dark2")+
+#   theme_minimal()
+
+# plot PCA for dim1:2
+plot(res_supp,
+     choix = "ind",
+     cex = 0.8,
+     habillage = "cohort",
+     title = "Individual PCA (dim 1:2)",
+     axes = 1:2)
+
+```
+**Observation**: STP0596 is positioned away from the other STOP samples. This pregnancy is PE + SGA. Is this driving PC1 and PC2?  
+```{r, echo=FALSE}
+# plot PCA for dim2:3
+plot(res_supp,
+     choix = "ind",
+     cex = 0.8,
+     habillage = "cohort",
+     title = "Individual PCA (dim 2:3)",
+     axes = 2:3)
+    
+```
+
+```{r, echo=FALSE}
+     # plot PCA for dim3:4
+plot(res_supp,
+     choix = "ind",
+     cex = 0.8,
+     habillage = "cohort",
+     title = "Individual PCA (dim 3:4)",
+     axes = 3:4)
+```
+
+```{r, echo=FALSE}
+
+# plot(res_supp,
+#      choix = "var",
+#      cex = 0.8,
+#      title = "Variables PCA dim3:4",
+#      axes = 3:4)
+
+# which individuals contribute most to the PCs
+# plot(res_supp,
+#      cex = 0.8,
+#      habillage = "Outcome",
+#      select = "contrib 5")
+
+# which variables contribute the most to the PCs
+# plot(res_supp,
+#      choix = "var",
+#      select = "contrib 5")
+
+# Extract eigenvalues/variances
+get_eig(res_supp)
+
+# Visualize eigenvalues/variances as scree plot
+fviz_screeplot(res_supp,
+               addlabels = TRUE,
+               ylim = c(0, 50))
+```
+
+```{r, echo=FALSE}
+# Extract the results for individuals
+ind <- get_pca_ind(res_supp)
+ind
+
+# Coordinates of individuals
+head(ind$coord)
+
+# Graph of variables
+# get the pca variables
+var <- get_pca_var(res_supp)
+
+# pull out the cos2 data
+cos2_data <- data.frame(var$cos2) %>%
+  dplyr::arrange(desc(Dim.1)) %>%
+  # add gene name
+  tibble::rownames_to_column("ensembl_gene_id") %>%
+  dplyr::left_join(., gene_info, by = "ensembl_gene_id") %>%
+  tidyr::drop_na(.) %>%
+  tibble::column_to_rownames("hgnc_symbol") %>%
+  dplyr::select(-ensembl_gene_id)
+
+# plot cos2 (dim 1:5)
+# png(filename=file.path(paste0(outdir, '/cos2_dim1_3.png')), width=800, height=150)
+corrplot(t(cos2_data[1:50, 1:3]),
+         is.corr=FALSE,
+         title = "cos2 Dim 1:3",
+         mar = c(1,1,1,1))
+# graphics.off()
+
+# plot cos2 (dim 2:5)
+# png(filename=file.path(paste0(outdir, '/cos2_dim2_21.png')), width=800, height=400)
+corrplot(t(cos2_data[1:50, -1]),
+         is.corr=FALSE,
+         title = "cos2 Dim 2:21",
+         mar = c(1,1,1,1))
+# graphics.off()
+```
+
+```{r, echo=FALSE}
+# pull out the contribution data
+contrib_data <- data.frame(var$contrib) %>%
+  dplyr::arrange(desc(Dim.1)) %>%
+  # add gene name
+  tibble::rownames_to_column("ensembl_gene_id") %>%
+  dplyr::left_join(., gene_info, by = "ensembl_gene_id") %>%
+  tidyr::drop_na(.) %>%
+  tibble::column_to_rownames("hgnc_symbol") %>%
+  dplyr::select(-ensembl_gene_id)
+
+# plot contribution (dim 1:5)
+# png(filename=file.path(paste0(outdir, '/contrib_dim1_3.png')), width=800, height=150)
+corrplot(t(contrib_data[1:50, 1:3]),
+         is.corr=FALSE,
+         title = "contribution Dim 1:3",
+         mar = c(1,1,1,1))
+
+# plot contribution (dim 2:5)
+# png(filename=file.path(paste0(outdir, '/contrib_dim2_21.png')), width=800, height=400)
+corrplot(t(contrib_data[1:50, -1]),
+         is.corr=FALSE,
+         title = "contribution Dim 2:21",
+         mar = c(1,1,1,1))
+# graphics.off()
+```
+
+```{r, echo=FALSE}
+
+# plot cos2 qualitative variables
+png(filename=file.path(paste0(outdir, '/cos2Quali_dim1_20.png')), width=400, height=800)
+corrplot(t(res_supp$quali.sup$cos2),
+         is.corr = FALSE,
+         title = "cos2 qualitative variables",
+         mar = c(1,1,1,1))
+```
+**Observation**: Seems to be a strong signal for PE:Control on Dim 1 but cohort is also here. How to remove the cohort signal but not the pathology??  
+
+```{r, echo=FALSE}
+
+# plot cos2 quantitative variables
+png(filename=file.path(paste0(outdir, '/cos2Quanti_dim1_20.png')), width=400, height=800)
+corrplot(t(res_supp$quanti.sup$cos),
+         is.corr = FALSE,
+         title = "cos2 quantitative variables",
+         mar = c(1,1,1,1))
+
+```
+**Observation**: Maternal Age has a strong cos2 on Dim 1 but this is complicated because the risk associated with maternal age is a "U-shaped" one. Much younger and much older women are most at risk of developing PE.  
+**Observation**: I thought I’d plot the maternal age across outcome to see if there was a pattern. Small numbers but there doesn’t appear to be a bias.  
+**Observation**: Maternal BMI is often given as another risk factor for PE. We don't appear to have a bias in high or low BMI associated with outcome.  
+
+```{r, echo=FALSE}
+
+# get the individual contributions
+# plot individual contributions to PCs
+ind <- get_pca_ind(res_supp)
+png(filename=file.path(paste0(outdir, '/indivCos2_dim1_20.png')), width=400, height=400)
+corrplot(t(ind$cos2),
+         is.corr = FALSE,
+         title = "cos2 of Individuals",
+         mar = c(1,1,1,1))
+# graphics.off()
+# png(filename=file.path(paste0(outdir, '/indivContrib_dim1_20.png')), width=400, height=400)
+corrplot(t(ind$contrib),
+         is.corr = FALSE,
+         title = "Contribution of Individuals",
+         mar = c(1,1,1,1))
+# graphics.off()
+```
+
+**Observation**: SCP4010 doesn't seem to have a strong relationship with Dim 1. This is the small library.  
+
+### Session information
+
+```{r, sessionInfo}
+
+sessionInfo()
+
+```

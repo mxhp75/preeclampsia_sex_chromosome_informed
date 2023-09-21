@@ -1,0 +1,106 @@
+---
+title: "metadataProcessing"
+author: "Melanie Smith"
+date: "11 July 2023"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(
+    echo = TRUE,
+    message = FALSE,
+    warning = FALSE,
+    cache = FALSE,
+    fig.align = "center",
+    results = "hide"
+)
+
+```
+
+# Load required libraries
+
+```{r load Libraries}
+
+library(plyr)
+library(reshape2)
+library(dplyr)
+library(stringr)
+library(edgeR)
+library(readxl)
+library(readr)
+library(magrittr)
+library(ggplot2)
+library(ggbeeswarm)
+library(ggrepel)
+library(RColorBrewer)
+library(pheatmap)
+library(ggpubr)
+
+# set project directory
+projectDir <- "/home/smit1924/sexInformedPreeclampsia"
+input_metadata <- file.path(projectDir, "cleanData/PlacentaGroup_Sample_information.csv")
+outfile <- file.path(projectDir, "clearBoxRawData/cleanSampleMetadata.csv")
+
+## UDFs
+# function to negate magrittr::%in%
+`%notin%` <- Negate(`%in%`)
+
+```
+
+# Data File Import
+## Sample metadata
+The sample list for old and new counts contains the identical sample names.  
+This metadata will be used for both sets of counts.
+
+```{r metadata}
+
+metadata <- read.csv(file = input_metadata) %>%
+  # keep only flowcell CDN0JANXX
+  dplyr::filter(., flowCell == "CDN0JANXX") %>%
+  # drop a couple of columns we don't need
+  dplyr::select(., -otherID, -SampleID, -jimmyBatch, -machineID, -flowCell, -R_samplename, -RIN)
+
+# create the flattened data column for the DE model.matrix and contrasts
+metadata %<>% dplyr::mutate(., sex_outcome = paste(Sex, Outcome, sep = "_"))
+dim(metadata)
+
+```
+
+## Drop samples not included in the final DE analysis
+
+```{r}
+
+# create object containing samples fail read depth QC
+QC_Remove <- c("SCP4060", "SCP4010")
+
+# remove the too small samples from the metadata
+metadata <- subset(metadata, samplename %notin% QC_Remove)
+
+# One of the samples is from a woman diagnosed with early-onset PE
+# as this analysis is focussed on late-onset PE, this sample is removed
+EOPE_Remove <- c("SCP3492")
+
+# remove EOPE sample
+metadata <- subset(metadata, samplename %notin% EOPE_Remove)
+dim(metadata)
+
+```
+
+## Save a clean copy of the metadata file (.csv)
+
+```{r}
+
+# save a csv of the minimal metadata file
+# write_csv(data.frame(metadata),
+#           file = outfile,
+#           col_names = TRUE)
+
+```
+
+## Session information
+
+```{r session info}
+
+sessionInfo()
+
+```

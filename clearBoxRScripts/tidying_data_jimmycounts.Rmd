@@ -1,0 +1,149 @@
+---
+title: "Melanie - tidying data"
+output: html_notebook
+---
+#Parameters
+```{r load Libraries}
+library(tidyverse)
+
+# Dirs
+projectDir <- "/Users/pillmaka/Desktop/Melanie"
+outdir <- file.path(projectDir, 'orig_jimmy')
+
+#Files
+input_counts <- file.path(projectDir, "jimmy_counts-all.stranded.S2.count.tsv")
+metadata_file <- file.path(projectDir, "PlacentaGroup_Sample_information.csv")
+gene_info_rds <- file.path(projectDir, "geneInfo.rds")
+
+# meta_tidy_csv <- file.path(outdir, "meta_df.csv")
+output_csv <- file.path(outdir, "jimmy_counts_geneID.csv")
+
+#Parameters
+flowcell_to_keep <- "CDN0JANXX" 
+
+dir.create(outdir)
+```
+
+```{r}
+#Import and tidy the metadata
+
+# import metadata and make a new samplename_flowcell ID
+placenta_meta <- read_csv(file = metadata_file) %>% 
+  dplyr::mutate(., name_flowCell = paste(samplename, flowCell, sep = "_")) %>% 
+  dplyr::arrange(., name_flowCell)
+
+meta_df <- placenta_meta %>% dplyr::select(-c(group, deliveryMode, Birthweight, jimmyBatch, machineID, RIN, reportedOutcome))
+
+# write_csv(meta_df, meta_tidy_csv)
+```
+
+### Tidy Gene-level counts
+```{r}
+# import the counts table
+grch38_mRNA_placenta_counts <- read_delim(file = input_counts,
+                                          delim = "\t",
+                                          comment = "#")
+
+# tidy up the sample IDs
+colnames(grch38_mRNA_placenta_counts) <- gsub("\\cancer\\/storage\\/alignments\\/CORE\\/placenta\\/hg38\\_STAR_bam\\/", "", colnames(grch38_mRNA_placenta_counts))
+colnames(grch38_mRNA_placenta_counts) <- gsub("\\.Aligned\\.sortedByCoord\\.out\\.bam", "", colnames(grch38_mRNA_placenta_counts))
+colnames(grch38_mRNA_placenta_counts) <- gsub("\\/", "", colnames(grch38_mRNA_placenta_counts))
+
+# Preview
+grch38_mRNA_placenta_counts %>% head
+dim(grch38_mRNA_placenta_counts)
+
+# Drop the columns we don't need anymore
+grch38_mRNA_placenta_counts <- grch38_mRNA_placenta_counts %>% 
+  tibble::column_to_rownames("Geneid") %>% 
+  dplyr::select(., -Chr, -Start, -End, -Strand, -Length)
+
+## Keep only one flowcell.
+#This also drops the other sample  (PAC and SRR) not in metadata sheet
+ids_to_keep <- meta_df %>% 
+  dplyr::filter(flowCell == flowcell_to_keep) %>% 
+  dplyr::select(otherID) %>% 
+  unlist() %>% 
+  unname()
+
+final_df <- grch38_mRNA_placenta_counts %>% dplyr::select(all_of(ids_to_keep))
+# check the dimensions
+dim(final_df)
+
+t_final_df <- t(final_df)
+t_final_df <- t_final_df %>% as.data.frame() %>% 
+  rownames_to_column(var='otherID')
+
+#Left join so we keep only the intended samples
+t_final_df <- left_join(t_final_df , meta_df %>% dplyr::select(otherID, samplename), by="otherID")
+
+t_final_df <- t_final_df %>% dplyr::select(-otherID) %>% column_to_rownames(var='samplename')
+
+final_df <- t(t_final_df) %>% as.data.frame()
+
+final_df <- final_df %>% rownames_to_column(var='Geneid')
+
+final_df
+write_csv(final_df, output_csv)
+```
+
+#Stuff that goes in a later script
+```{r}
+# Gene level annotation information
+# geneInfo <- readRDS(file = gene_info_rds)
+# 
+# gene_id_vs_symbol <- geneInfo %>% dplyr::select(ensembl_gene_id, hgnc_symbol) 
+# gene_id_vs_symbol <- gene_id_vs_symbol %>% distinct(, .keep_all = TRUE)
+# #Drop ones without a gene symbol - just for simplicity.
+# gene_id_vs_symbol[gene_id_vs_symbol == ""] <- NA
+# gene_id_vs_symbol <- gene_id_vs_symbol %>% drop_na()
+# # gene_id_vs_symbol[duplicated(gene_id_vs_symbol$hgnc_symbol), ] 
+# #There are 5 genes with multiple gene IDs
+# #Just pick one for each arbitrarily
+# gene_id_vs_symbol <- gene_id_vs_symbol %>% group_by(hgnc_symbol) %>% slice(1)
+
+# gene_info_hg38 <- readRDS(file = file.path(projectDir, "genes.rds"))
+# This suggests that the larger file contains ALL the same geneIDs in the small one
+# so it's safe to ditch the small one.
+# union(geneInfo$ensembl_gene_id, gene_info_hg38$gene_id)  %>% length()
+# [1] 67998
+# > dim(gene_info_hg38)
+# [1] 67998    13
+# > dim(geneInfo)
+# [1] 120075      6
+# 
+# #Cut it down to just the genes with gene symbols
+# final_df <- left_join(gene_id_vs_symbol, grch38_mRNA_placenta_counts, join_by(ensembl_gene_id == gene_id))
+# 
+# final_df <- final_df %>% ungroup() %>% dplyr::select(., -ensembl_gene_id) %>% column_to_rownames(var="hgnc_symbol")
+# 
+# #Now subset down to just genes we're interested in.
+# 
+# # create object containing samples fail read depth QC
+# QC_Remove <- c("SCP4060_CDN0JANXX", "SCP4010_CDN0JANXX")
+# 
+# # remove too small samples from the counts
+# grch38_mRNA_placenta_counts <- grch38_mRNA_placenta_counts %>%
+#   dplyr::select(., -all_of(QC_Remove))
+# 
+# # remove the too small samples from the metadata
+# placenta_meta <- subset(placenta_meta, name_flowCell %notin% QC_Remove)
+# 
+# # One of the samples is from a woman diagnosed with early-onset PE
+# # as this analysis is focussed on late-onset PE, this sample is removed
+# EOPE_Remove <- c("SCP3492_CDN0JANXX", "SCP3492_C9FNFANXX")
+# 
+# 
+# # set factor levels for outcomes
+# placenta_meta$Outcome <- factor(placenta_meta$Outcome, c("Control", "PE"))
+```
+
+## Session information
+```{r session info, echo=TRUE}
+
+sessionInfo()
+
+```
+
+
+

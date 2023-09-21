@@ -1,0 +1,85 @@
+---
+title: "fdrtools"
+author: "Melanie Smith"
+date: "15 August 2023"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+# Load required libraries
+```{r load Libraries}
+library(plyr)
+library(reshape2)
+library(dplyr)
+library(stringr)
+library(edgeR)
+library(readxl)
+library(readr)
+library(magrittr)
+library(tibble)
+library(ggplot2)
+library(ggrepel)
+library(fdrtool)
+
+# set project directory
+projectDir <- "/home/smit1924/sexInformedPreeclampsia"
+# projectDir <- "/Users/pillmaka/Desktop/Melanie/drive-download"
+
+expt_name <- 'fdrtools'
+
+outdir <- file.path(projectDir, paste0(expt_name, "_output"))
+
+# input files
+counts_log2CPM_file <- file.path(projectDir, "noCovariate_output/noCovariatelog2CPM.csv")
+
+gene_info_file <- file.path(projectDir, "clearBoxRawData/gene_id_vs_symbol.csv")
+metadata_file <- file.path(projectDir, "clearBoxRawData/cleanSampleMetadata.csv")
+allTable_DE_file <- file.path(projectDir, "noCovariate_output/noCovariatepValue_DE.csv")
+
+dir.create(outdir)
+
+# set max digits
+options(digits=3)
+
+# set filtering criteria
+filterCPM <- 2
+numSamples <- 5
+
+```
+
+# Import all input data tables
+
+```{r}
+## Count data
+# import the count file for DE
+log2CPM <- read_csv(file = counts_log2CPM_file) %>%
+    tibble::column_to_rownames("ensembl")
+
+## Metadata
+metadata <- read_csv(file = metadata_file)
+male <- dplyr::filter(metadata, Sex == "M") %>%
+  dplyr::select(., samplename)
+female <- dplyr::filter(metadata, Sex == "F") %>%
+  dplyr::select(., samplename)
+
+## Gene ID versus GeneSymbol
+gene_info <- read_csv(file = gene_info_file)
+
+## DE table
+noCovariatefiltered_DE <- read_csv(file = allTable_DE_file)
+
+```
+
+# fdrtools
+
+```{r}
+
+fdr_result_F <- fdrtool(noCovariatefiltered_DE$P.Value_F, statistic = "pvalue", plot = TRUE)
+fdr_result_M <- fdrtool(noCovariatefiltered_DE$P.Value_M, statistic = "pvalue", plot = TRUE)
+
+fdr_result_F$param
+
+```
