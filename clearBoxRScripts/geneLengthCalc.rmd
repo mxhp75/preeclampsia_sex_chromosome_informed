@@ -19,12 +19,12 @@ library(readr)
 library(magrittr)
 
 # set project directory
-projectDir <- "/home/smit1924/sexInformedPreeclampsia"
-expt_name <- "melanie_v2_0_3"
+projectDir <- "/home/smit1924/preeclampsia_sex_chromosome_informed"
+expt_name <- "featureCounts_v2_0_3"
 
-genome_gtf_infile <- file.path(projectDir, "cleanData/gencode.v29.annotation.gtf")
-input_counts_female <- file.path(projectDir, "rawData/test_v2.0.3_female_readCounts.txt")
-input_counts_male <- file.path(projectDir, "rawData/test_v2.0.3_male_readCounts.txt")
+genome_gtf_infile <- file.path(projectDir, "clearBoxRawData/gencode.v29.annotation.gtf")
+input_counts_female <- file.path(projectDir, "clearBoxRawData/featureCounts_v2.0.3_female_readCounts.txt")
+input_counts_male <- file.path(projectDir, "clearBoxRawData/featureCounts_v2.0.3_male_readCounts.txt")
 input_metadata_file <- file.path(projectDir, "clearBoxRawData/cleanSampleMetadata.csv")
 
 outdir <- file.path(projectDir, paste0(expt_name, "_output"))
