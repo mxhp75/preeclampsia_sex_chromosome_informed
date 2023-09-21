@@ -20,7 +20,7 @@ library(ggrepel)
 library(pheatmap)
 
 # set project directory
-projectDir <- "/home/smit1924/sexInformedPreeclampsia"
+projectDir <- "/home/smit1924/preeclampsia_sex_chromosome_informed"
 # projectDir <- "/Users/pillmaka/Desktop/Melanie/drive-download"
 
 expt_name <- 'female_noCovariate'
@@ -173,4 +173,10 @@ allTable_female_PE_BMI <- topTable(contrast_fit_PE_BMI,
                              coef = 1,
                              n = Inf,
                              sort = "p")
+```
+
+```{r}
+# residuals
+ResidualsMatrix <- residuals(fit_PE_BMI, dge_list_obj)
+
 ```

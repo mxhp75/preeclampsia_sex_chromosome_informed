@@ -50,3 +50,4 @@ rsconnect/
 
 # large genome files
 *.gff3
+.Rproj.user
