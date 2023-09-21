@@ -17,7 +17,7 @@ library(magrittr)
 library(rtracklayer)
 
 # set project directory
-projectDir <- "/home/smit1924/sexInformedPreeclampsia"
+projectDir <- "/home/smit1924/preeclampsia_sex_chromosome_informed"
 
 # define input files
 gencodev32_gff_inFile <- file.path(projectDir, "clearBoxRawData/gencode.v32.chr_patch_hapl_scaff.annotation.gff3")

@@ -24,7 +24,7 @@ library(tibble)
 # library(ggpubr)
 
 # set project directory
-projectDir <- "/home/smit1924/sexInformedPreeclampsia"
+projectDir <- "/home/smit1924/preeclampsia_sex_chromosome_informed"
 # projectDir <- "/Users/pillmaka/Desktop/Melanie/drive-download"
 
 expt_name <- 'jimmy'
