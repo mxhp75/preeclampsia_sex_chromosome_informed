@@ -1,0 +1,59 @@
+cohort,samplename,GestationalAge,reportedOutcome,Outcome,Sex,maternalAge,BMI,SmokingStatus,Ethnicity,Birthweight,deliveryMode,group,sex_outcome
+SCOPE,SCP3412,36.86,PE,PE,M,22,43.5,N,Caucasian,4220,LSCS in labour,2,M_PE
+SCOPE,SCP3628,41.29,Uncomplicated,Control,F,22,22.5,N,Caucasian,3825,Operative vaginal,1,F_Control
+SCOPE,SCP3660,38.43,Uncomplicated,Control,F,18,25.5,Y,Caucasian,3615,LSCS in labour,1,F_Control
+SCOPE,SCP3780,40.29,Uncomplicated,Control,F,32,22.1,N,Asian,3540,Unassisted vaginal,1,F_Control
+SCOPE,SCP3843,40.43,Uncomplicated,Control,F,24,25.5,N,Caucasian,3260,Unassisted vaginal,1,F_Control
+SCOPE,SCP3877,39.43,Uncomplicated,Control,F,29,27,Y,Polynesian,2945,LSCS in labour,1,F_Control
+SCOPE,SCP3929,41.43,Uncomplicated,Control,M,22,26.9,N,Caucasian,3990,Operative vaginal,1,M_Control
+SCOPE,SCP3954,41.29,Uncomplicated,Control,M,20,21.6,N,Caucasian,3464,LSCS in labour,1,M_Control
+SCOPE,SCP3962,40.57,PE,PE,M,20,21.5,N,Caucasian,3618,Unassisted vaginal,2,M_PE
+SCOPE,SCP3992,41.14,Uncomplicated,Control,F,22,22.9,Y,Caucasian,3800,Operative vaginal,1,F_Control
+SCOPE,SCP4059,41,Uncomplicated,Control,M,21,25.4,N,Caucasian,3910,Unassisted vaginal,1,M_Control
+SCOPE,SCP4073,41.43,Uncomplicated,Control,F,22,26.5,Y,Caucasian,3770,Unassisted vaginal,1,F_Control
+SCOPE,SCP4139,40,Uncomplicated,Control,F,33,33.3,N,Caucasian,4175,LSCS in labour,1,F_Control
+SCOPE,SCP4154,41.43,PE,PE,F,32,35.5,Y,Caucasian,2655,LSCS in labour,2,F_PE
+SCOPE,SCP4157,39.43,PE,PE,M,22,36.2,N,Caucasian,3510,Unassisted vaginal,2,M_PE
+SCOPE,SCP4164,40.71,PE,PE,F,20,22.7,N,Caucasian,2152,Operative vaginal,2,F_PE
+SCOPE,SCP4196,40.71,Uncomplicated,Control,M,20,26.3,N,Caucasian,3875,LSCS in labour,1,M_Control
+SCOPE,SCP4319,39.86,Uncomplicated,Control,M,24,24.5,N,Caucasian,4200,Operative vaginal,1,M_Control
+SCOPE,SCP4378,39.71,Uncomplicated,Control,F,22,44.7,N,Polynesian,3840,Unassisted vaginal,1,F_Control
+SCOPE,SCP4536,40.57,Uncomplicated,Control,F,22,24.6,N,Caucasian,3550,Unassisted vaginal,1,F_Control
+SCOPE,SCP4538,36.57,PE,PE,F,25,31.1,N,Caucasian,2735,Unassisted vaginal,2,F_PE
+SCOPE,SCP4578,40.29,Uncomplicated,Control,M,18,32.2,Y,Caucasian,3280,Operative vaginal,1,M_Control
+SCOPE,SCP4706,39.43,Uncomplicated,Control,F,22,27.6,Y,Caucasian,3065,Unassisted vaginal,1,F_Control
+SCOPE,SCP4726,38.29,PE,PE,F,34,30.2,N,Caucasian,2605,LSCS in labour,2,F_PE
+SCOPE,SCP4733,39.86,Uncomplicated,Control,F,25,25.4,N,Caucasian,3120,Unassisted vaginal,1,F_Control
+SCOPE,SCP4748,41.43,Uncomplicated,Control,F,22,24.8,N,Caucasian,3910,Unassisted vaginal,1,F_Control
+SCOPE,SCP4809,39.57,Uncomplicated,Control,M,25,23.5,N,Asian,3320,LSCS in labour,1,M_Control
+SCOPE,SCP4913,40.57,Uncomplicated,Control,M,26,24,N,Caucasian,3680,Unassisted vaginal,1,M_Control
+STOP,STP0016,40.71,Uncomplicated,Control,F,30,20.8,N,Caucasian,3665,LSCS in labour,1,F_Control
+STOP,STP0023,41.14,Uncomplicated,Control,F,23,21.5,N,Caucasian,3220,Unassisted vaginal,1,F_Control
+STOP,STP0105,38.71,Uncomplicated,Control,M,27,32.2,N,Caucasian,4465,Prelabour LSCS,1,M_Control
+STOP,STP0148,36.57,PE + sPTB,PE,M,27,23.6,N,Caucasian,2595,Unassisted vaginal,2,M_PE
+STOP,STP0230,41,PE (& PE + Other),PE,F,18,28.1,N,Caucasian,3650,LSCS in labour,2,F_PE
+STOP,STP0275,39.29,PE (& PE + Other),PE,F,31,29.6,N,Caucasian,4090,Unassisted vaginal,2,F_PE
+STOP,STP0282,37.257,PE (& PE + Other),PE,F,34,26.9,N,Caucasian,3890,Prelabour LSCS,2,F_PE
+STOP,STP0378,39.29,Uncomplicated,Control,M,25,18.2,N,Caucasian,3250,Unassisted vaginal,1,M_Control
+STOP,STP0582,39.29,Uncomplicated,Control,F,29,25.5,N,Caucasian,3336,LSCS in labour,1,F_Control
+STOP,STP0583,41.86,Uncomplicated,Control,M,30,25.8,N,Caucasian,3640,LSCS in labour,1,M_Control
+STOP,STP0593,37.71,PE (& PE + Other),PE,F,25,29.4,N,Aboriginal,2960,Unassisted vaginal,2,F_PE
+STOP,STP0596,38.14,Uncomplicated,Control,M,21,44.1,N,Caucasian,3940,LSCS in labour,1,M_Control
+STOP,STP0636,39.57,Uncomplicated,Control,F,21,25.3,N,Caucasian,4360,Unassisted vaginal,1,F_Control
+STOP,STP0677,37.71,GDM + PE,PE,F,21,52.4,N,Caucasian,3308,LSCS in labour,2,F_PE
+STOP,STP0692,40.43,Uncomplicated,Control,F,24,22.2,N,SouthEastAndFarEast,3585,Unassisted vaginal,1,F_Control
+STOP,STP0761,41.71,Uncomplicated,Control,F,24,35.9,N,Caucasian,3750,Prelabour LSCS,1,F_Control
+STOP,STP0788,40.71,Uncomplicated,Control,F,22,23.7,N,Caucasian,4380,Unassisted vaginal,1,F_Control
+STOP,STP0793,37.29,PE (& PE + Other),PE,F,17,31.2,Y,Caucasian,2908,Operative vaginal,2,F_PE
+STOP,STP0795,40.57,Uncomplicated,Control,M,26,25.3,N,Caucasian,3280,Unassisted vaginal,1,M_Control
+STOP,STP0852,40.14,Uncomplicated,Control,F,28,20.1,N,Caucasian,3480,LSCS in labour,1,F_Control
+STOP,STP0867,40.14,Uncomplicated,Control,F,29,22.6,N,SouthEastAndFarEast,3845,Unassisted vaginal,1,F_Control
+STOP,STP0888,40.71,Uncomplicated,Control,F,27,24.6,N,Caucasian,3202,Unassisted vaginal,1,F_Control
+STOP,STP0903,40.86,Uncomplicated,Control,F,26,25.6,N,Caucasian,3506,Operative vaginal,1,F_Control
+STOP,STP0912,38.71,Uncomplicated,Control,F,28,26.9,N,Caucasian,3260,Prelabour LSCS,1,F_Control
+STOP,STP0932,41,Uncomplicated,Control,M,30,20.4,N,Caucasian,3315,Operative vaginal,1,M_Control
+STOP,STP0944,40,PE + SGA,PE,M,26,42.7,N,Caucasian,3114,Operative vaginal,2,M_PE
+STOP,STP1002,39.14,Uncomplicated,Control,M,26,33,N,Caucasian,3850,Unassisted vaginal,1,M_Control
+STOP,STP1082,39.86,Uncomplicated,Control,F,21,20.8,N,Caucasian,3240,Unassisted vaginal,1,F_Control
+STOP,STP1087,39.14,Uncomplicated,Control,F,32,23.5,N,Caucasian,3240,Unassisted vaginal,1,F_Control
+STOP,STP1206,39.57,Uncomplicated,Control,M,26,25.2,N,Caucasian,3585,Prelabour LSCS,1,M_Control
