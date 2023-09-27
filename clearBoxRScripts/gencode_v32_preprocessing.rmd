@@ -14,6 +14,7 @@ library(reshape2)
 library(dplyr)
 library(stringr)
 library(magrittr)
+library(readr)
 library(rtracklayer)
 
 # set project directory
@@ -23,7 +24,7 @@ projectDir <- "/home/smit1924/preeclampsia_sex_chromosome_informed"
 gencodev32_gff_inFile <- file.path(projectDir, "clearBoxRawData/gencode.v32.chr_patch_hapl_scaff.annotation.gff3")
 
 # define output files
-outfile <- file.path(projectDir, "clearBoxRawData/gencode_v32_gene_id_vs_symbol.csv")
+outfile <- file.path(projectDir, "clearBoxRawData/gencode_v32_gene_id_symbol_chr_biotype.csv")
 
 ```
 
@@ -34,20 +35,23 @@ outfile <- file.path(projectDir, "clearBoxRawData/gencode_v32_gene_id_vs_symbol.
 # import the gencodev32_gff_inFile file
 all_gencode_v32 <- rtracklayer::import(gencodev32_gff_inFile)
 gene_data <- data.frame(ensembl_gene_id = all_gencode_v32@elementMetadata$gene_id,
-                        hgnc_symbol = all_gencode_v32@elementMetadata$gene_name
-                        )
+                        hgnc_symbol = all_gencode_v32@elementMetadata$gene_name,
+                        seqnames = all_gencode_v32@seqnames,
+                        gene_type = all_gencode_v32@elementMetadata$gene_type)
 # we're left with multiple identical rows - lets just keep one each
-gene_id_vs_symbol <- gene_data %>% distinct(, .keep_all = TRUE)
+gencode_v32_gene_id_symbol_chr_biotype <- gene_data %>% 
+  distinct(, .keep_all = TRUE)
 #Drop ones without a gene symbol - just for simplicity.
 # first add NA to any missing data
-gene_id_vs_symbol[gene_id_vs_symbol == ""] <- NA
+gencode_v32_gene_id_symbol_chr_biotype[gencode_v32_gene_id_symbol_chr_biotype == ""] <- NA
 # then drop anything with an NA
-gene_id_vs_symbol <- gene_id_vs_symbol %>% tidyr::drop_na()
+gencode_v32_gene_id_symbol_chr_biotype <- gencode_v32_gene_id_symbol_chr_biotype %>%
+  tidyr::drop_na()
 # which genes have multiple ensembl IDs
-gene_id_vs_symbol[duplicated(gene_id_vs_symbol$hgnc_symbol), ] 
+gencode_v32_gene_id_symbol_chr_biotype[duplicated(gencode_v32_gene_id_symbol_chr_biotype$hgnc_symbol), ] 
 #There are genes with multiple gene IDs
 #Just pick one for each gene based on the earliest ensembl ID
-gene_id_vs_symbol <- gene_id_vs_symbol %>%
+gencode_v32_gene_id_symbol_chr_biotype <- gencode_v32_gene_id_symbol_chr_biotype %>%
   group_by(hgnc_symbol) %>%
   arrange(ensembl_gene_id) %>%
   filter(row_number()==1) %>%
@@ -62,9 +66,9 @@ gene_id_vs_symbol <- gene_id_vs_symbol %>%
 ```{r}
 
 # save a csv of the combined raw counts table
-# write_csv(data.frame(gene_id_vs_symbol),
-#           file = outfile,
-#           col_names = TRUE)
+readr::write_csv(data.frame(gencode_v32_gene_id_symbol_chr_biotype),
+          file = outfile,
+          col_names = TRUE)
 
 ```
 
