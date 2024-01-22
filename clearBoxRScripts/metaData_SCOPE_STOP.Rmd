@@ -21,7 +21,7 @@ library(ggrepel)
 library(pheatmap)
 
 # set project directory
-projectDir <- "/home/smit1924/sexInformedPreeclampsia"
+projectDir <- "/home/smit1924/preeclampsia_sex_chromosome_informed"
 dataFolder <- "/home/smit1924/dataFolder"
 
 expt_name <- 'metaData_SCOPE_STOP'
@@ -44,7 +44,7 @@ source(file.path(dataFolder, "/redcap_api_import.R"))
 # Import SCOPE
 ```{r}
 # make a vector of interesting variables
-SCOPE_variables <- c("f7_pco", "f7_if_pco_tx_conception",
+SCOPE_variables <- c("f26_Baby_DOB", "f7_pco", "f7_if_pco_tx_conception",
                      "f6c_mat_sga_status", "f3_low_dose_aspirin",
                      "f6_partcpt_bwgt", "f6c_partcpt_bwgt_gp",
                      "f6_partnr_bwgt", "f6c_partnr_bwgt_gp",
@@ -101,6 +101,12 @@ subsetSCOPE %<>% dplyr::mutate(., WHR = f11_waist/f11_hip) %>%
                                            "Moderate", "High"))
                 )
 subsetSCOPE %<>% dplyr::mutate(., HiWR = f11_hgt/f11_waist)
+
+# convert date as factor to date format and save
+deliveryDate_SCOPE <- subsetSCOPE %>%
+  dplyr::mutate(deliveryDate = as.Date(as.character(f26_Baby_DOB), format = "%d/%m/%Y")) %>%
+  dplyr::select(., samplename, f26_Baby_DOB, deliveryDate)
+
 ```
 
 # Import STOP
@@ -108,8 +114,7 @@ subsetSCOPE %<>% dplyr::mutate(., HiWR = f11_hgt/f11_waist)
 ```{r import STOP}
 
 # variables I want
-STOP_variables <- c("participant_id", 
-                     "f1_age",
+STOP_variables <- c("participant_id", "f1_age",
                      "f5_pco", "f5_pco_conception",
                      "f5_bwgt","f5_partner_bwgt",
                      "f6_mother_misc", "f6_sister_misc",
@@ -128,7 +133,7 @@ STOP_variables <- c("participant_id",
                      "f11_age", "f11_cig_1st_trim",
                      "f13_glucose_booking", "f13_glucose_gestw", 
                      "f22_sex", "f22_gestw_del",
-                     "f22_birthwgt",
+                     "f22_birthwgt", "f22_dob",
                      "f29_doppler", "f29_doppler_2", 
                      "f29_dopp_1_umbri", "f29_dopp_2_umbri")
 
@@ -171,6 +176,24 @@ subsetSTOP %<>% dplyr::mutate(., WHR = f9_waist/f9_hip) %>%
 # convert STOP height to m
 subsetSTOP$f9_hgt <- subsetSTOP$f9_hgt*100
 subsetSTOP %<>% dplyr::mutate(., HiWR = f9_hgt/f9_waist)
+
+# convert date as character to date format and save
+deliveryDate_STOP <- subsetSTOP %>%
+  dplyr::mutate(deliveryDate = as.Date(f22_dob)) %>%
+  dplyr::select(., samplename, f22_dob, deliveryDate)
+
+```
+
+## Combine delivery dates
+
+```{r}
+
+deliveryDate_combined <- rbind(deliveryDate_SCOPE %>%
+                                 dplyr::select(., samplename, originalDate = f26_Baby_DOB, deliveryDate),
+                               deliveryDate_STOP %>%
+                                 dplyr::select(., samplename, originalDate = f22_dob, deliveryDate))
+
+# readr::write_csv(deliveryDate_combined, file.path(outdir, "deliveryDate_combined.csv"))
 ```
 
 ## Combine SCOPE and STOP
