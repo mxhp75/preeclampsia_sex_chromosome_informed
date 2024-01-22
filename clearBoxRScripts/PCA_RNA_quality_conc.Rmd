@@ -1,0 +1,366 @@
+---
+title: "PCA_RNA_quality_conc"
+author: "Melanie Smith"
+date: "17 January 2024"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(
+    echo = TRUE,
+    message = FALSE,
+    warning = FALSE,
+    cache = FALSE,
+    fig.align = "center",
+    results = "hide"
+)
+
+```
+
+# Load required libraries
+
+```{r}
+library(plyr)
+library(reshape2)
+library(dplyr)
+library(stringr)
+library(edgeR)
+library(readxl)
+library(readr)
+library(magrittr)
+library(FactoMineR)
+library(factoextra)
+library(corrplot)
+
+
+# set project directory
+projectDir <- "/home/smit1924/preeclampsia_sex_chromosome_informed"
+# projectDir <- "/Users/pillmaka/Desktop/Melanie/drive-download"
+
+expt_name <- "PCA_qc"
+
+log2CPM_infile <- file.path(projectDir, "clearBoxRawData/melanie_v2_0_3logCPM.csv")
+metadata_infile <- file.path(projectDir, "clearBoxRawData/cleanSampleMetadata.csv")
+gene_info_file <- file.path(projectDir, "clearBoxRawData/gene_id_vs_symbol.csv")  
+rnaQuality_infile <- file.path(projectDir, "clearBoxRawData/rin_conc.xlsx")
+
+outdir <- file.path(projectDir, paste0(expt_name, "_output"))
+# output_spreadsheet_file <- file.path(outdir, paste0(expt_name, "_.csv"))
+
+dir.create(outdir)
+
+```
+
+## Data File Import
+### Import log2CPM counts
+
+```{r}
+# import the counts table
+log2CPM <- read_csv(file = log2CPM_infile) %>%
+  as.data.frame() %>%
+  tibble::column_to_rownames("ensembl_gene_id")
+dim(log2CPM)
+```
+
+### Import metadata and RNA quality
+
+```{r}
+# import the metadata table
+metadata <- read_csv(file = metadata_infile) %>%
+  as.data.frame()
+dim(metadata)
+
+# import the RNA quality file
+rna_quality <- read_excel(rnaQuality_infile)
+# small function to capture the samplename
+create_samplename <- function(input_column) {
+  # Extract the first three letters
+  first_three_letters <- substr(input_column, 1, 3)
+  # Extract the numbers after the first underscore
+  numbers_after_first_underscore <- substr(input_column, 5, 8)
+  # Concatenate the results
+  samplename <- paste0(first_three_letters, numbers_after_first_underscore)
+  return(samplename)
+}
+# add the new samplename column
+rna_quality$samplename <- create_samplename(rna_quality$sample)
+
+# import the delivery date information
+deliveryDate_combined <- readr::read_csv(file.path(projectDir, "metaData_SCOPE_STOP_output/deliveryDate_combined.csv"))
+
+# import time to freezer information
+# STOP
+STOP_placentaFreezerSamples <- readr::read_csv(file.path(projectDir, "clearBoxRawData/STOP_placentaFreezerSamples.csv")) %>%
+  # drop all the noisy NAs down the bottom of Dylan's spreadsheet 
+  dplyr::filter(complete.cases(.)) %>%
+  # add a samplename that matches the rest of my data
+  dplyr::mutate(., samplename = paste0("STP", Patient_ID)) %>%
+  # keep one instance of each samplename
+  dplyr::distinct(samplename, notCollectThreeHrs, .keep_all = TRUE)
+## coerce dates from character to date format
+STOP_placentaFreezerSamples$dateSampleCollected <- as.Date(STOP_placentaFreezerSamples$dateSampleCollected, format = "%d/%m/%Y")
+STOP_placentaFreezerSamples$dateSampleFrozen_80C <- as.Date(STOP_placentaFreezerSamples$dateSampleFrozen_80C, format = "%d/%m/%Y")
+#SCOPE from Dylan email
+SCOPE_placentaFeezerSamples <- data.frame(
+  SCOPE_ID = as.numeric(c(3412,3628,3660,3780,3843,3877,3929,3954,3962,3992,4059,4073,4139,4154,4157,4164,4196,4319,4378,4536,4538,4578,4706,4726,4733,4748,4809,4913)),
+  DOB =	as.Date(c('27/12/2007','15/02/2008','24/02/2008','10/03/2008','21/03/2008','20/03/2008','16/04/2008','30/04/2008','13/04/2008','31/03/2008','20/04/2008','24/06/2008','4/07/2008','25/06/2008','21/06/2008','29/06/2008','24/07/2008','24/08/2008','15/09/2008','29/10/2008','10/09/2008','8/10/2008','25/11/2008','11/12/2008','4/12/2008','29/12/2008','29/11/2008','15/01/2009'),
+                format = "%d/%m/%Y"),
+  Date_collected_in_lab = as.Date(c('28/12/2007','19/02/2008','28/02/2008','17/03/2008','27/03/2008','27/03/2008','21/04/2008','7/05/2008','16/04/2008','2/04/2008','21/04/2008','27/06/2008','5/07/2008','27/06/2008','NA','NA','31/07/2008','27/08/2008','16/09/2008','NA','16/09/2008','13/10/2008','25/11/2008','NA','NA','30/12/2008','NA','NA'),
+                                  format = "%d/%m/%Y")) %>%
+  dplyr::mutate(., samplename = paste0("SCP", SCOPE_ID)) %>%
+  dplyr::select(., samplename, DOB, Date_collected_in_lab)
+# combine the freezer data
+combined_placentaFreezerSamples <- rbind(STOP_placentaFreezerSamples %>%
+                                           dplyr::select(., samplename, deliveryDate = dateSampleCollected, dateSampleFrozen_80C),
+                                         SCOPE_placentaFeezerSamples %>%
+                                           dplyr::select(., samplename, deliveryDate = DOB, dateSampleFrozen_80C = Date_collected_in_lab)) %>%
+  # add a column to calculate the number of days taken from delivery to freezer
+  dplyr::mutate(., days_to_freezer = dateSampleFrozen_80C-deliveryDate)
+
+```
+
+### combine metadata and RNA quality information
+
+```{r}
+metadata_quality <- dplyr::left_join(metadata, rna_quality, by = "samplename") %>%
+  dplyr::left_join(., deliveryDate_combined, by = "samplename") %>%
+  # add the number of days between delivery date and today
+  dplyr::mutate(., days_diff = difftime(Sys.Date(), deliveryDate, units = "days")) %>%
+  # add the "time to freezer" information
+  dplyr::left_join(., combined_placentaFreezerSamples, by = "samplename")
+```
+
+### plot the quality and delivery date information
+
+```{r}
+
+# using the original delivery date (as a proxy for how old the samples are) how does sample age relate to sample RQI
+metadata_quality %>%
+  ggplot(aes(x = deliveryDate,
+             y = RQI,
+             size = 6)) +
+  geom_point(aes(shape = factor(cohort),
+                 colour = Conc)) +
+  facet_wrap(vars(cohort), scales = "free")
+
+# how does RNA quality (RQI) relate to the concentration of RNA
+metadata_quality %>%
+  ggplot(aes(x = Conc,
+             y = RQI)) +
+  geom_point(aes(colour = factor(cohort))) +
+  geom_smooth(aes(group = cohort,
+                  colour = cohort),
+              method = lm)
+
+# use the original delivery date to calculate the age of the sample and re-plot against RQN and concentration
+metadata_quality %>%
+  ggplot(aes(x = as.numeric(days_diff),
+             y = RQI)) +
+  geom_point() +
+  geom_smooth(aes(group = cohort,
+                  colour = cohort),
+              method = lm) +
+  facet_wrap(vars(cohort), scales = "free")
+
+# does the time to freezer (days) appear to correlate with the RQI or concentration?
+metadata_quality %>%
+  ggplot(aes(x = as.numeric(days_to_freezer),
+             y = RQI)) +
+  geom_point() +
+  geom_smooth(aes(group = cohort,
+                  colour = cohort),
+              method = lm) +
+  facet_wrap(vars(cohort), scales = "free")
+
+metadata_quality %>%
+  ggplot(aes(x = as.numeric(days_to_freezer),
+             y = Conc)) +
+  geom_point() +
+  geom_smooth(aes(group = cohort,
+                  colour = cohort),
+              method = lm) +
+  facet_wrap(vars(cohort), scales = "free")
+
+```
+
+### Import gene information
+
+```{r}
+## Gene ID versus GeneSymbol
+gene_info <- read_csv(file = gene_info_file)
+```
+
+### Drop least variable genes
+This step allows me to see which genes are the most variable between all of my samples
+I will subset the top 1000 most variable genes based on both I90PR (10-90) and IQR (25-75).  
+First we calculate the interdecile range and plot the log2 gene expression of the top 1000 variable genes  
+
+```{r}
+
+#Select most variable genes
+percentile_data <- apply(as.matrix(log2CPM), 1, quantile, c(0, .1, .25, .5, .75, .9, 1))
+percentile_data[, 1:5]
+
+# calculate the interdecile range
+# These data represent the range of expression values between he lower and upper 10% of the distribution for each gene
+I90PR <- percentile_data["90%", ] - percentile_data["10%", ]
+
+gene_i90pr <- sort(I90PR, decreasing=TRUE)
+# and top 5000 genes were selected.
+top_genes <- names(gene_i90pr[1:1000])
+
+top_genes_i90pr <- log2CPM %>%
+  as.data.frame() %>% 
+  tibble::rownames_to_column(var = 'gene') %>%
+  dplyr::filter(gene %in% top_genes) %>%
+  tibble::column_to_rownames(var = 'gene') %>%
+  as.matrix()
+
+heatmap_df_i90pr <- t(scale(t(top_genes_i90pr),
+                      center = TRUE,
+                      scale = TRUE))
+
+
+# set up the column annotations
+col_anno <- data.frame(metadata_quality) %>% 
+  dplyr::select(., samplename, Outcome, cohort, SmokingStatus, RQI, Conc, sex_outcome) %>%
+  tibble::column_to_rownames("samplename")
+
+
+par(mar=c(6,2,2,1)+0.1) 
+# png(filename=file.path(paste0(outdir, '/heatmap_i90pr_CPM.png')), width=800, height=1000)
+pheatmap::pheatmap(heatmap_df_i90pr,
+                   annotation_col = col_anno,
+                   show_rownames = FALSE,
+                   scale = "none",
+                   cluster_rows = TRUE,
+                   cluster_cols = TRUE,
+                   main = "i90pr male")
+# graphics.off()
+```
+
+
+```{r}
+
+# calculate the interquartile range
+# These data represent the range of expression values between he lower and upper 25% of the distribution of genes
+IQR <- percentile_data["75%", ] - percentile_data["25%", ]
+# sort highest to lowest expression
+gene_iqr <- sort(IQR, decreasing = TRUE)
+# and top 1000 genes were selected.
+top_genes_iqr <- names(gene_iqr[1:1000])
+ 
+top_genes_df_iqr <- log2CPM %>%
+  as.data.frame() %>% 
+  tibble::rownames_to_column(var = 'gene') %>%
+  dplyr::filter(gene %in% top_genes_iqr) %>%
+  tibble::column_to_rownames(var = 'gene') %>%
+  as.matrix()
+
+heatmap_df_iqr <- t(scale(t(top_genes_df_iqr),
+                      center=TRUE,
+                      scale=TRUE))
+
+# plot the heatmap
+par(mar=c(6,2,2,1)+0.1) 
+# png(filename=file.path(paste0(outdir, '/heatmap_iqr_CPM.png')), width=800, height=1000)
+pheatmap::pheatmap(heatmap_df_iqr,
+                   annotation_col = col_anno,
+                   show_rownames = FALSE,
+                   scale = "none",
+                   cluster_rows = TRUE,
+                   cluster_cols = TRUE,
+                   main = "iqr male")
+# graphics.off()
+
+```
+
+### PCA
+Lets take a look at the top 2000 genes (IQR) in a PCA.  
+
+```{r}
+
+# vector of top 2000 genes in the IQR
+top_2000_genes_iqr <- names(gene_iqr[1:2000])
+
+scaled_log2CPM <- t(scale(t(log2CPM),
+                      center = TRUE,
+                      scale = TRUE))
+
+# PCA with top 5000 genes, all male samples
+res_2000_iqr <- FactoMineR::PCA(
+  scaled_log2CPM %>%
+    as.data.frame() %>%
+    tibble::rownames_to_column(var='gene') %>%
+    dplyr::filter(gene %in% top_2000_genes_iqr) %>%
+    tibble::column_to_rownames(var='gene') %>%
+    as.matrix() %>%
+    t(),
+  ncp = 50,
+  graph = FALSE
+)
+
+print(res_2000_iqr)
+
+# print summary of results
+summary(res_2000_iqr,
+        nbelements = Inf)
+
+# add the supplementary variables to the logged counts table
+lcpm_supp <- scaled_log2CPM %>%
+    as.data.frame() %>%
+    tibble::rownames_to_column(var='gene') %>%
+  # keep only top 2000 genes
+    dplyr::filter(gene %in% top_2000_genes_iqr) %>%
+    tibble::column_to_rownames(var='gene') %>%
+    as.matrix() %>%
+    t() %>%
+  as.data.frame() %>%
+  tibble::rownames_to_column("samplename") %>%
+  # add the supplementary variables
+  dplyr::left_join(., dplyr::select(metadata_quality, samplename, GestationalAge, maternalAge, BMI, Birthweight, RQI, Conc,
+                                    cohort, Outcome, Ethnicity, SmokingStatus, Sex),
+                   by = "samplename") %>%
+  # move samplename back into the rownames
+  tibble::column_to_rownames("samplename")
+
+# PCA with top 2000 genes, all samples and added supp variables
+res_supp <- FactoMineR::PCA(lcpm_supp,
+                            # add columns for quantitative variables
+                            quanti.sup = 2001:2006,
+                            # add columns for qualitative variables
+                            quali.sup = 2007:2011,
+                            ncp = 50,
+                            graph = FALSE)
+# print summary of results for all individuals
+summary(res_supp, nbelements = Inf)
+
+# description of the dimensions. Measures the correlation (R2 value) between each variable and the dimension listed. By default only correlations not equal to zero are shown. Default p-value < 0.05.
+dimdesc(res_supp)
+
+# plot PCA for indivuals
+plot(res_supp,
+     cex = 0.8,
+     invisible = "quali",
+     title = "Individuals PCA Graph")
+ 
+plot(res_supp,
+     cex = 0.8)
+
+# plot PCA with 95% confidence elipse
+# png(filename=file.path(paste0(outdir, '/plotellipses_2000_iqr.png')), width=1000, height=800)
+plotellipses(res_supp,
+             axes = c(1, 2))
+# graphics.off()
+
+# plot PCA with 95% confidence elipse
+# png(filename=file.path(paste0(outdir, '/plotellipses_2000_iqr_dim2_3.png')), width=1000, height=800)
+plotellipses(res_supp,
+             axes = c(2, 3))
+# graphics.off()
+# plot PCA with 95% confidence elipse
+# png(filename=file.path(paste0(outdir, '/plotellipses_2000_iqr_dim3_4.png')), width=1000, height=800)
+plotellipses(res_supp,
+             axes = c(3, 4))
+# graphics.off()
+```
