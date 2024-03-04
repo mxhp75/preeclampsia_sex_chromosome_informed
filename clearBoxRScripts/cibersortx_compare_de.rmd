@@ -1,0 +1,538 @@
+---
+title: "cibersortx_compare_DE"
+author: "Melanie Smith"
+date: "1 March 2024"
+output: html_document
+---
+
+# Load required libraries
+```{r load Libraries}
+library(plyr)
+library(reshape2)
+library(dplyr)
+library(tidyr)
+library(stringr)
+library(edgeR)
+library(readxl)
+library(readr)
+library(magrittr)
+library(tibble)
+library(ggplot2)
+library(ggbeeswarm)
+library(ggrepel)
+library(pheatmap)
+
+# set project directory
+projectDir <- "/home/smit1924/preeclampsia_sex_chromosome_informed"
+# projectDir <- "/Users/pillmaka/Desktop/Melanie/drive-download"
+
+expt_name <- 'cibersortx_de'
+
+
+counts_geneID_file <- file.path(projectDir, "clearBoxRawData/rawCounts_melanie_v2.0.3.csv")
+dge_list_obj_file <- file.path(projectDir, "noCovariate_output/DGEList_filtered_normalised.rds")
+allTable_female_file <- file.path(projectDir, "noCovariate_output/allTable_female.csv")
+allTable_male_file <- file.path(projectDir, "noCovariate_output/allTable_male.csv")
+topTable_male_file <- file.path(projectDir, "noCovariate_output/topTable_male_pe.csv")
+gene_info_file <- file.path(projectDir, "clearBoxRawData/gene_id_vs_symbol.csv")
+
+cibersortx_proportion_file <- file.path(projectDir, "cibersortx/outdir/CIBERSORTx_Adjusted.txt")
+cibersortx_sigMatrix_file <- file.path(projectDir, "cibersortx/outdir/CIBERSORTx_sigmatrix_Adjusted.txt")
+
+outdir <- file.path(projectDir, paste0(expt_name, "_output"))
+
+dir.create(outdir)
+
+# set max digits
+options(digits=3)
+
+```
+
+# Import all input data tables
+
+```{r}
+
+## DGEList object
+dge_list_obj <- readRDS(dge_list_obj_file)
+
+# DE tables (no covariate)
+allTable_female <- read_csv(file = allTable_female_file)
+allTable_male <- read_csv(file = allTable_male_file)
+topTable_male <- read_csv(file = topTable_male_file)
+
+## Gene ID versus GeneSymbol
+gene_info <- read_csv(file = gene_info_file)
+
+## Gene ID versus GeneSymbol
+gene_info <- read_csv(file = gene_info_file)
+gene_info <- gene_info[!duplicated(gene_info$ensembl_gene_id), ]
+
+# CIBERSORTx signature matrix and proportion files
+cibersortx_proportion <- read.table(file = cibersortx_proportion_file, header = TRUE, sep = "\t") %>%
+  dplyr::select(., samplename = Mixture, everything()) %>%
+  dplyr::select(., -'P.value', -'Correlation', -'RMSE')
+cibersortx_sigMatrix <- read.table(file = cibersortx_sigMatrix_file, header = TRUE, sep = "\t")
+# remove rows that contain all zero counts in the signature matrix
+cibersortx_sigMatrix <- cibersortx_sigMatrix[rowSums(cibersortx_sigMatrix[,-1])>0,]
+
+```
+
+### Plot cell-type proportions
+
+```{r}
+# which cell types are the most abundent
+ordered_celltypes <- data.frame(proportion = 
+  colSums(cibersortx_proportion[, -1])[order(colSums(cibersortx_proportion[, -1]),
+                                             decreasing = TRUE)]
+  ) %>%
+  tibble::rownames_to_column("cell_type")
+  
+# convert proportions table to long table format
+data_long <- tidyr::pivot_longer(cibersortx_proportion,
+                                 cols = colnames(cibersortx_proportion[, !colnames(cibersortx_proportion) %in% "samplename"]),
+                                 names_to = "cell_type",
+                                 values_to = "proportion")
+
+# Generate 27 distinct colors from the viridis palette
+my_palette <- colorspace::rainbow_hcl(27)
+
+# Plot the stacked bar chart (not ordered)
+ggplot(data_long, aes(x = samplename, y = proportion, fill = cell_type)) +
+  geom_bar(stat = "identity") +
+  labs(title = "CIBERSORTx Deconvolution", x = "Samplename", y = "Cell-Type Proportion") +
+  theme_minimal() +
+  theme(legend.position = "right") +
+  viridis::scale_fill_viridis(discrete = TRUE, option = "C") +
+  theme(axis.text.x = element_text(angle = 90, hjust = 1))
+
+# Reorder samplenames based on the proportion of Fetal Cytotrophoblasts
+ordered_samples_fetal_CTB <- dplyr::filter(data_long, cell_type == "Fetal.Cytotrophoblasts") %>%
+  arrange(desc(proportion)) %>%
+  pull(samplename)
+
+# Replot proprtions based on the proportion of Fetal B Cells
+png(filename=file.path(outdir, 'cibersortx_decon_CTB.png'), width=1200, height=800)
+ggplot(data_long, aes(x = factor(samplename, levels = ordered_samples_fetal_CTB), y = proportion, fill = cell_type)) +
+  geom_bar(stat = "identity") +
+  labs(title = "CIBERSORTx Deconvolution (ordered by prop. CTB)",
+       x = "Samplename",
+       y = "Cell-Type Proportion") +
+  theme_minimal() +
+  theme(legend.position = "right") +
+  viridis::scale_fill_viridis(discrete = TRUE, option = "C") +
+  theme(axis.text.x = element_text(angle = 90, hjust = 1))
+graphics.off()
+
+# Reorder samplenames based on the proportion of Maternal FCGR3A+ Monocytes
+ordered_samples_maternal_mono <- dplyr::filter(data_long, cell_type == "Maternal.FCGR3A..Monocytes") %>%
+  arrange(desc(proportion)) %>%
+  pull(samplename)
+
+# Replot proprtions based on the proportion of Maternal FCGR3A+ Monocytes
+png(filename=file.path(outdir, 'cibersortx_decon_mat_mono.png'), width=1200, height=800)
+ggplot(data_long, aes(x = factor(samplename, levels = ordered_samples_maternal_mono),
+                      y = proportion,
+                      fill = cell_type)) +
+  geom_bar(stat = "identity") +
+  labs(title = "CIBERSORTx Deconvolution (ordered by prop. Maternal FCGR3A+ Monocytes)", x = "Samplename", y = "Cell-Type Proportion") +
+  theme_minimal() +
+  theme(legend.position = "right") +
+  viridis::scale_fill_viridis(discrete = TRUE, option = "C") +
+  theme(axis.text.x = element_text(angle = 90, hjust = 1))
+graphics.off()
+
+# Reorder samplenames based on the proportion of Maternal.Naive.CD8..T.Cells
+ordered_samples_maternal_CD8_tcells <- dplyr::filter(data_long, cell_type == "Maternal.Naive.CD8..T.Cells") %>%
+  arrange(desc(proportion)) %>%
+  pull(samplename)
+
+# Replot proprtions based on the proportion of Maternal FCGR3A+ Monocytes
+png(filename=file.path(outdir, 'cibersortx_decon_mat_CD8_tcells.png'), width=1200, height=800)
+ggplot(data_long, aes(x = factor(samplename, levels = ordered_samples_maternal_CD8_tcells),
+                      y = proportion,
+                      fill = cell_type)) +
+  geom_bar(stat = "identity") +
+  labs(title = "CIBERSORTx Deconvolution (ordered by prop. Maternal CD8+ T Cells)",
+       x = "Samplename",
+       y = "Cell-Type Proportion") +
+  theme_minimal() +
+  theme(legend.position = "right") +
+  viridis::scale_fill_viridis(discrete = TRUE, option = "C") +
+  theme(axis.text.x = element_text(angle = 90, hjust = 1))
+graphics.off()
+
+
+
+
+
+# Heatmap of cell-type proportions
+# add column annotation for maternal v fetal cells
+# add row annotation for male v female samples
+# add row annotation for PE v Uncomplicated
+
+row_anno <- metadata_quality %>%
+  dplyr::select(., samplename, Sex, Outcome, sex_outcome) %>%
+  tibble::column_to_rownames("samplename")
+
+column_anno <- data.frame(cell_type = colnames(cibersortx_sigMatrix[,-1]),
+                          compartment = as.factor(colnames(cibersortx_sigMatrix[,-1]))) %>%
+  tibble::column_to_rownames("cell_type")
+
+library(stringr)
+
+# Split column names at the first period and extract the first element
+compartment <- str_split_fixed(colnames(cibersortx_sigMatrix[, -1]), "\\.", n = 2)[, 1]
+
+# Create the data frame
+column_anno <- data.frame(
+  cell_type = colnames(cibersortx_sigMatrix[, -1]),
+  compartment = as.factor(compartment)
+) %>%
+  tibble::column_to_rownames("cell_type")
+
+
+
+png(filename=file.path(outdir, 'cibersortx_heatmap_row_anno.png'), width=800, height=800)
+pheatmap::pheatmap(cibersortx_proportion %>% tibble::column_to_rownames("samplename"),
+                   annotation_row = row_anno,
+                   annotation_col = column_anno,
+                   scale = "row")
+graphics.off()
+
+```
+
+# Sanity plot of genes
+## PE associated genes from the literature
+
+```{r}
+# let's take a look at genes previously identified as associated with PE
+# Gene of Interest (GOI)
+# genes typically identified as up-regulated in the context of PE
+GOI_PE_UP <- data.frame(ensbl=c("ENSG00000178726", "ENSG00000115602",
+                             "ENSG00000174697", "ENSG00000070404",
+                             "ENSG00000169495", "ENSG00000136002",
+                             "ENSG00000012223", "ENSG00000142623",
+                             "ENSG00000224658", "ENSG00000102755",
+                             "ENSG00000118849", "ENSG00000165810",
+                             "ENSG00000211448", "ENSG00000243836",
+                             "ENSG00000150722", "ENSG00000181458",
+                             "ENSG00000159399"),
+                  gene=c("THBD", "IL1RL1", "LEP", "FSTL3",
+                         "HTRA4", "ARHGEF4", "LTF", "PADI1",
+                         "RP11-631F7.1", "FLT1", "RARRES1",
+                         "BTNL9", "DIO2", "WDR86-AS1", "PPP1R1C",
+                         "TMEM45A", "HK2"),
+                  direction = "up")
+
+# genes typically identified as down-regulated in the context of PE
+GOI_PE_DOWN <- data.frame(ensbl=c("ENSG00000233913", "ENSG00000134548",
+                                  "ENSG00000203859", "ENSG00000213088",
+                                  "ENSG00000114473", "ENSG00000260719",
+                                  "ENSG00000091137", "ENSG00000157064"),
+                  gene=c("RPL10P9", "SPX", "HSD3B2", "ACKR1",
+                         "IQCG", "AC009133.17", "SLC26A4", "NMNAT2"),
+                  direction = "down")
+
+samples <- dge_list_obj$samples
+
+counts <- edgeR::cpm(dge_list_obj, log = TRUE)
+
+pd <- position_dodge(width = 0.5)
+
+lcpm <- edgeR::cpm(dge_list_obj, log = TRUE)
+
+## Print all of the plots at once
+for (i in 1:nrow(GOI_PE_UP)) {
+melt_lcpm <- melt(subset(lcpm, rownames(lcpm) %in% GOI_PE_UP$ensbl[i])) %>% 
+  as.data.frame() %>% 
+  set_colnames(c("ensbl", "samplename", "log2cpm")) %>% 
+  # tibble::rownames_to_column("samplename") %>% 
+  left_join(., dge_list_obj$samples[, c("samplename", "sex_outcome", "Sex")], by = "samplename") 
+  
+beeswarm <- ggplot(melt_lcpm, aes(x = Sex,
+                                y = log2cpm,
+                                fill = sex_outcome)) +
+  stat_boxplot(geom="errorbar",
+               position = pd,
+               width = 0.2) +
+  geom_boxplot(width = 0.5,
+               position = pd) +
+  stat_summary(fun = mean,
+               geom = "point",
+               size=2,
+               shape = 5,
+               position = position_dodge(0.5)) +
+  geom_beeswarm(dodge.width = 0.6, cex = 2) +
+  geom_text_repel(aes(label = samplename), size = 3, nudge_x = 0.1, nudge_y = 0.1) +
+  theme_bw(base_size = 18) +
+  ylab(paste("log2 CPM Counts", GOI_PE_UP$ensbl[i], GOI_PE_UP$gene[i], sep = " - ")) +
+  theme(axis.text.x = element_text(colour = "black")) +
+  theme(legend.position = "bottom")
+print(beeswarm)
+}
+
+```
+
+## DE genes from my analysis (no covariate model)
+
+```{r}
+# let's take a look at the DE genes with the highest logFC that also have a "decent" expression level
+
+# which gene would we like to plot??
+gene_to_plot <- "ENSG00000047457"
+
+# png(filename=file.path(outdir, "expression_DE_gene_CP_sexOutcome.png'), width=800, height=800)
+# Gene of Interest (GOI)
+GOI_PE_UP <- data.frame(ensbl=c("ENSG00000178726", "ENSG00000115602",
+                             "ENSG00000174697", "ENSG00000070404",
+                             "ENSG00000169495", "ENSG00000136002",
+                             "ENSG00000012223", "ENSG00000142623",
+                             "ENSG00000224658", "ENSG00000102755",
+                             "ENSG00000118849", "ENSG00000165810",
+                             "ENSG00000211448", "ENSG00000243836",
+                             "ENSG00000150722", "ENSG00000181458",
+                             "ENSG00000159399"),
+                  gene=c("THBD", "IL1RL1", "LEP", "FSTL3",
+                         "HTRA4", "ARHGEF4", "LTF", "PADI1",
+                         "RP11-631F7.1", "FLT1", "RARRES1",
+                         "BTNL9", "DIO2", "WDR86-AS1", "PPP1R1C",
+                         "TMEM45A", "HK2"),
+                  direction = "up")
+
+GOI_PE_male_UP <- topTable_male_pe %>%
+  arrange(desc(logFC)) %>%
+  dplyr::select(., ensbl = ensembl_gene_id, gene = hgnc_symbol)
+
+GOI_PE_DOWN <- data.frame(ensbl=c("ENSG00000233913", "ENSG00000134548",
+                                  "ENSG00000203859", "ENSG00000213088",
+                                  "ENSG00000114473", "ENSG00000260719",
+                                  "ENSG00000091137", "ENSG00000157064"),
+                  gene=c("RPL10P9", "SPX", "HSD3B2", "ACKR1",
+                         "IQCG", "AC009133.17", "SLC26A4", "NMNAT2"),
+                  direction = "down")
+
+GOI_UP_DOWN <- rbind(GOI_PE_UP, GOI_PE_DOWN)
+
+samples <- dge_list_obj$samples
+
+counts <- edgeR::cpm(dge_list_obj, log = TRUE)
+
+pd <- position_dodge(width = 0.5)
+
+lcpm <- edgeR::cpm(dge_list_obj, log = TRUE)
+
+## Print all of the plots at once
+for (i in 1:nrow(GOI_PE_UP)) {
+melt_lcpm <- melt(subset(lcpm, rownames(lcpm) %in% GOI_PE_UP$ensbl[i])) %>% 
+  as.data.frame() %>% 
+  set_colnames(c("ensbl", "samplename", "log2cpm")) %>% 
+  # tibble::rownames_to_column("samplename") %>% 
+  left_join(., dge_list_obj$samples[, c("samplename", "Outcome", "Sex")], by = "samplename") 
+  
+beeswarm <- ggplot(melt_lcpm, aes(x = Sex,
+                                y = log2cpm,
+                                fill = Outcome)) +
+  stat_boxplot(geom="errorbar",
+               position = pd,
+               width = 0.2) +
+  geom_boxplot(width = 0.5,
+               position = pd) +
+  #     geom_boxplot(aes(x = Fetal.Sex,
+  #                  y =  log2cpm,
+  #                  fill = simpleOutcome)) +
+  stat_summary(fun = mean,
+               geom = "point",
+               size=2,
+               shape = 5,
+               position = position_dodge(0.5)) +
+  geom_beeswarm(dodge.width = 0.6, cex = 2) +
+  theme_bw(base_size = 18) +
+  ylab(paste("log2 CPM Counts", GOI_PE_UP$ensbl[i], GOI_PE_UP$gene[i], sep = " - ")) +
+  theme(axis.text.x = element_text(colour = "black")) +
+  theme(legend.position = "bottom")
+print(beeswarm)
+}
+
+# graphics.off()
+```
+
+## Volcano plot for visualisation of differential expression
+### male
+
+```{r volcano plots male}
+
+decide <- decideTests(contrast_fit_sex_PE)
+d2 <- topTable(contrast_fit_sex_PE, coef = 2, n = Inf, sort = "p") #[,c(2,6)]
+d2$threshold <- 0
+d2$threshold[0:nrow(filter(allTable_male_PE, adj.P.Val < 0.05))] <- 1
+d2$threshold <- as.factor(d2$threshold)
+d3 <- decideTests(contrast_fit_sex_PE) %>%
+  as.data.frame()
+d3 <- d3[2]
+d4 <- left_join(tibble::rownames_to_column(d2), (tibble::rownames_to_column(d3)),
+                       by = "rowname")
+d4$male_PE <- as.factor(d4$male_PE)
+d4$neg.log10FDR <- -log10(d4$adj.P.Val)
+# set colours for the volcano plot
+colour <- c("red", "black", "darkgreen")
+FDR_FC_Decide <- decideTests(contrast_fit_sex_PE, lfc = 0)[,"male_PE"] %>%
+  as.data.frame() %>%
+  set_colnames("FDR_FC_Decide") %>%
+  tibble::rownames_to_column() %>%
+  left_join(., d4, by = "rowname")
+FDR_FC_Decide$FDR_FC_Decide <- as.factor(FDR_FC_Decide$FDR_FC_Decide)
+
+volcano_male <- ggplot(data = FDR_FC_Decide,
+                  aes(x = logFC,
+                      y = neg.log10FDR,
+                      label = rowname,
+                      colour = FDR_FC_Decide)) +
+  geom_point(alpha=0.9, size=2.00) +
+  xlab(expression(Log[2]*" Fold Change")) + ylab(expression("-ve "*Log[10]*" FDR")) +
+  scale_color_manual(values = colour, name="mRNA\nRegulation",
+                         breaks = c("-1", "0", "1"),
+                         labels = c("Down-regulated", "Not Significant", "Up-regulated")) +
+  theme(plot.title = element_text(hjust = 0.5)) +
+  geom_hline(yintercept = -log10(.05), linetype = "dotted") +
+  geom_vline(xintercept = c(-1, 1), linetype = "dotted") +
+  theme_bw() +
+  theme(text = element_text(size=18)) +
+  theme(axis.text.x = element_text(colour = "black",
+                                   face = "bold"),
+        axis.text.y = element_text(colour = "black",
+                                   face = "bold")) +
+  theme(axis.title.x = element_text(colour = "black",
+                                   face = "bold"),
+        axis.title.y = element_text(colour = "black",
+                                   face = "bold")) +
+  geom_label_repel(data = dplyr::filter(FDR_FC_Decide, FDR_FC_Decide==1),
+                  aes(label = hgnc_symbol),
+                  fill = "white",
+                  xlim = c(7, 0),
+                  max.overlaps = Inf,
+                  show.legend = FALSE) +
+  geom_label_repel(data = dplyr::filter(FDR_FC_Decide, FDR_FC_Decide==-1),
+                  aes(label = hgnc_symbol),
+                  fill = "white",
+                  xlim = c(-7, 0),
+                  max.overlaps = Inf,
+                  show.legend = FALSE) +
+  theme(legend.position="bottom")
+
+ggsave(plot = volcano_male,
+       filename = file.path(projectDir, "noCovariate_output/volcano_male.pdf"),
+       units = "in",
+       width = 12,
+       height = 12,
+       dpi = 300)
+
+
+```
+
+### female
+
+```{r volcano plots female}
+
+decide <- decideTests(contrast_fit_sex_PE)
+d2 <- topTable(contrast_fit_sex_PE, coef = 1, n = Inf, sort = "p") #[,c(2,6)]
+d2$threshold <- 0
+d2$threshold[0:nrow(filter(allTable_female_PE, adj.P.Val < 0.05))] <- 1
+d2$threshold <- as.factor(d2$threshold)
+d3 <- decideTests(contrast_fit_sex_PE) %>%
+  as.data.frame()
+d3 <- d3[1]
+d4 <- left_join(tibble::rownames_to_column(d2), (tibble::rownames_to_column(d3)),
+                       by = "rowname")
+d4$female_PE <- as.factor(d4$female_PE)
+d4$neg.log10FDR <- -log10(d4$adj.P.Val)
+# set colours for the volcano plot
+colour <- c("red", "black", "darkgreen")
+FDR_FC_Decide <- decideTests(contrast_fit_sex_PE, lfc = 0)[,"female_PE"] %>%
+  as.data.frame() %>%
+  set_colnames("FDR_FC_Decide") %>%
+  tibble::rownames_to_column() %>%
+  left_join(., d4, by = "rowname")
+FDR_FC_Decide$FDR_FC_Decide <- as.factor(FDR_FC_Decide$FDR_FC_Decide)
+
+volcano_female <- ggplot(data = FDR_FC_Decide,
+                  aes(x = logFC,
+                      y = neg.log10FDR,
+                      label = rowname,
+                      colour = FDR_FC_Decide)) +
+  geom_point(alpha=0.9, size=2.00) +
+  xlab(expression(Log[2]*" Fold Change")) + ylab(expression("-ve "*Log[10]*" FDR")) +
+  scale_color_manual(values = colour, name="mRNA\nRegulation",
+                         breaks = c("-1", "0", "1"),
+                         labels = c("Down-regulated", "Not Significant", "Up-regulated")) +
+  theme(plot.title = element_text(hjust = 0.5)) +
+  geom_hline(yintercept = -log10(.05), linetype = "dotted") +
+  geom_vline(xintercept = c(-1, 1), linetype = "dotted") +
+  theme_bw() +
+  theme(text = element_text(size=18)) +
+  theme(axis.text.x = element_text(colour = "black",
+                                   face = "bold"),
+        axis.text.y = element_text(colour = "black",
+                                   face = "bold")) +
+  theme(axis.title.x = element_text(colour = "black",
+                                   face = "bold"),
+        axis.title.y = element_text(colour = "black",
+                                   face = "bold")) +
+  geom_label_repel(data = dplyr::filter(FDR_FC_Decide, FDR_FC_Decide==1),
+                  aes(label = hgnc_symbol),
+                  fill = "white",
+                  xlim = c(7, 0),
+                  max.overlaps = Inf,
+                  show.legend = FALSE) +
+  geom_label_repel(data = dplyr::filter(FDR_FC_Decide, FDR_FC_Decide==-1),
+                  aes(label = hgnc_symbol),
+                  fill = "white",
+                  xlim = c(-7, 0),
+                  max.overlaps = Inf,
+                  show.legend = FALSE) +
+  theme(legend.position="bottom")
+
+ggsave(plot = volcano_female,
+       filename = file.path(projectDir, "noCovariate_output/volcano_female.pdf"),
+       units = "in",
+       width = 12,
+       height = 12,
+       dpi = 300)
+
+
+```
+
+# Heatmaps
+
+```{r}
+# Modify ordering of the clusters using clustering callback option
+callback = function(hc, mat){
+    sv = svd(t(mat))$v[,1]
+    dend = reorder(as.dendrogram(hc), wts = sv)
+    as.hclust(dend)
+}
+
+annotation_cols <- metadata[, c("samplename", "Sex", "Outcome")] %>%
+  tibble::column_to_rownames("samplename")
+
+scaled_exp <- scale(t(subset(log2CPM, rownames(log2CPM) %in% dplyr::filter(FDR_FC_Decide, threshold == 1)$ensembl_gene_id)))
+
+# png(file=file.path(outdir, "heatmap_scaled_sig_AdjPVal_M.png"),
+#     width=12,
+#     height=8,
+#     units = "in",
+#     res = 150)
+pheatmap(t(scaled_exp),
+         annotation_col = annotation_cols,
+         show_rownames = FALSE,
+         show_colnames = TRUE,
+         cutree_cols = 3,
+         clustering_callback = callback)
+# dev.off()
+
+```
+
+# Session information
+
+```{r session info}
+sessionInfo()
+```
