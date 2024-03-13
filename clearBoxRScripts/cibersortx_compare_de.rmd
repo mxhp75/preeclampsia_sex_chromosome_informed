@@ -31,6 +31,7 @@ expt_name <- 'cibersortx_de'
 
 counts_geneID_file <- file.path(projectDir, "clearBoxRawData/rawCounts_melanie_v2.0.3.csv")
 dge_list_obj_file <- file.path(projectDir, "noCovariate_output/DGEList_filtered_normalised.rds")
+metadata_quality_file <- file.path(projectDir, "clearBoxCleanData/metadata_quality.csv")
 allTable_female_file <- file.path(projectDir, "noCovariate_output/allTable_female.csv")
 allTable_male_file <- file.path(projectDir, "noCovariate_output/allTable_male.csv")
 topTable_male_file <- file.path(projectDir, "noCovariate_output/topTable_male_pe.csv")
@@ -40,8 +41,18 @@ cibersortx_proportion_file <- file.path(projectDir, "cibersortx/outdir/CIBERSORT
 cibersortx_sigMatrix_file <- file.path(projectDir, "cibersortx/outdir/CIBERSORTx_sigmatrix_Adjusted.txt")
 
 outdir <- file.path(projectDir, paste0(expt_name, "_output"))
+outdir_literatureUp <- file.path(paste0(outdir, "/literatureUp"))
+outdir_literatureDown <- file.path(paste0(outdir, "/literatureDown"))
+outdir_deUp <- file.path(paste0(outdir, "/deUp"))
+outdir_deDown <- file.path(paste0(outdir, "/deDown"))
+
+
 
 dir.create(outdir)
+dir.create(paste0(outdir, "/literatureUp"))
+dir.create(paste0(outdir, "/literatureDown"))
+dir.create(paste0(outdir, "/deUp"))
+dir.create(paste0(outdir, "/deDown"))
 
 # set max digits
 options(digits=3)
@@ -54,6 +65,7 @@ options(digits=3)
 
 ## DGEList object
 dge_list_obj <- readRDS(dge_list_obj_file)
+metadata_quality <- read_csv(file = metadata_quality_file)
 
 # DE tables (no covariate)
 allTable_female <- read_csv(file = allTable_female_file)
@@ -192,7 +204,7 @@ column_anno <- data.frame(
 
 
 
-png(filename=file.path(outdir, 'cibersortx_heatmap_row_anno.png'), width=800, height=800)
+png(filename=file.path(outdir, 'cibersortx_heatmap_row_col_anno.png'), width=800, height=800)
 pheatmap::pheatmap(cibersortx_proportion %>% tibble::column_to_rownames("samplename"),
                    annotation_row = row_anno,
                    annotation_col = column_anno,
@@ -234,21 +246,21 @@ GOI_PE_DOWN <- data.frame(ensbl=c("ENSG00000233913", "ENSG00000134548",
                   direction = "down")
 
 samples <- dge_list_obj$samples
-
-counts <- edgeR::cpm(dge_list_obj, log = TRUE)
-
 pd <- position_dodge(width = 0.5)
 
 lcpm <- edgeR::cpm(dge_list_obj, log = TRUE)
 
-## Print all of the plots at once
+## Print all of the up plots at once
 for (i in 1:nrow(GOI_PE_UP)) {
 melt_lcpm <- melt(subset(lcpm, rownames(lcpm) %in% GOI_PE_UP$ensbl[i])) %>% 
   as.data.frame() %>% 
   set_colnames(c("ensbl", "samplename", "log2cpm")) %>% 
   # tibble::rownames_to_column("samplename") %>% 
   left_join(., dge_list_obj$samples[, c("samplename", "sex_outcome", "Sex")], by = "samplename") 
-  
+
+png(filename=file.path(outdir_literatureUp, paste(GOI_PE_UP$ensbl[i], GOI_PE_UP$gene[i], "png",sep = ".")),
+    width=800,
+    height=800)  
 beeswarm <- ggplot(melt_lcpm, aes(x = Sex,
                                 y = log2cpm,
                                 fill = sex_outcome)) +
@@ -265,12 +277,50 @@ beeswarm <- ggplot(melt_lcpm, aes(x = Sex,
   geom_beeswarm(dodge.width = 0.6, cex = 2) +
   geom_text_repel(aes(label = samplename), size = 3, nudge_x = 0.1, nudge_y = 0.1) +
   theme_bw(base_size = 18) +
-  ylab(paste("log2 CPM Counts", GOI_PE_UP$ensbl[i], GOI_PE_UP$gene[i], sep = " - ")) +
+  ggtitle(paste(GOI_PE_UP$ensbl[i], GOI_PE_UP$gene[i], sep = " - ")) +
+  ylab(paste("log2 CPM Counts")) +
   theme(axis.text.x = element_text(colour = "black")) +
   theme(legend.position = "bottom")
 print(beeswarm)
+graphics.off()
+#print(beeswarm)
 }
 
+## Print all of the down plots at once
+for (i in 1:nrow(GOI_PE_DOWN)) {
+melt_lcpm <- melt(subset(lcpm, rownames(lcpm) %in% GOI_PE_DOWN$ensbl[i])) %>% 
+  as.data.frame() %>% 
+  set_colnames(c("ensbl", "samplename", "log2cpm")) %>% 
+  # tibble::rownames_to_column("samplename") %>% 
+  left_join(., dge_list_obj$samples[, c("samplename", "sex_outcome", "Sex")], by = "samplename") 
+
+png(filename=file.path(outdir_literatureDown, paste(GOI_PE_DOWN$ensbl[i], GOI_PE_DOWN$gene[i], "png",sep = ".")),
+    width=800,
+    height=800)  
+beeswarm <- ggplot(melt_lcpm, aes(x = Sex,
+                                y = log2cpm,
+                                fill = sex_outcome)) +
+  stat_boxplot(geom="errorbar",
+               position = pd,
+               width = 0.2) +
+  geom_boxplot(width = 0.5,
+               position = pd) +
+  stat_summary(fun = mean,
+               geom = "point",
+               size=2,
+               shape = 5,
+               position = position_dodge(0.5)) +
+  geom_beeswarm(dodge.width = 0.6, cex = 2) +
+  geom_text_repel(aes(label = samplename), size = 3, nudge_x = 0.1, nudge_y = 0.1) +
+  theme_bw(base_size = 18) +
+  ggtitle(paste(GOI_PE_DOWN$ensbl[i], GOI_PE_DOWN$gene[i], sep = " - ")) +
+  ylab(paste("log2 CPM Counts")) +
+  theme(axis.text.x = element_text(colour = "black")) +
+  theme(legend.position = "bottom")
+print(beeswarm)
+graphics.off()
+#print(beeswarm)
+}
 ```
 
 ## DE genes from my analysis (no covariate model)
@@ -278,82 +328,126 @@ print(beeswarm)
 ```{r}
 # let's take a look at the DE genes with the highest logFC that also have a "decent" expression level
 
-# which gene would we like to plot??
-gene_to_plot <- "ENSG00000047457"
+GOI_PE_male_UP <- topTable_male %>%
+  dplyr::filter(logFC > 0 & AveExpr > 3) %>%
+  dplyr::select(ensbl = ensembl_gene_id, gene = hgnc_symbol) %>%
+  mutate(direction = "up")
 
-# png(filename=file.path(outdir, "expression_DE_gene_CP_sexOutcome.png'), width=800, height=800)
-# Gene of Interest (GOI)
-GOI_PE_UP <- data.frame(ensbl=c("ENSG00000178726", "ENSG00000115602",
-                             "ENSG00000174697", "ENSG00000070404",
-                             "ENSG00000169495", "ENSG00000136002",
-                             "ENSG00000012223", "ENSG00000142623",
-                             "ENSG00000224658", "ENSG00000102755",
-                             "ENSG00000118849", "ENSG00000165810",
-                             "ENSG00000211448", "ENSG00000243836",
-                             "ENSG00000150722", "ENSG00000181458",
-                             "ENSG00000159399"),
-                  gene=c("THBD", "IL1RL1", "LEP", "FSTL3",
-                         "HTRA4", "ARHGEF4", "LTF", "PADI1",
-                         "RP11-631F7.1", "FLT1", "RARRES1",
-                         "BTNL9", "DIO2", "WDR86-AS1", "PPP1R1C",
-                         "TMEM45A", "HK2"),
-                  direction = "up")
+GOI_PE_male_DOWN <- topTable_male %>%
+  dplyr::filter(logFC < 0 & AveExpr > 3) %>%
+  dplyr::select(ensbl = ensembl_gene_id, gene = hgnc_symbol) %>%
+  mutate(direction = "down")
 
-GOI_PE_male_UP <- topTable_male_pe %>%
-  arrange(desc(logFC)) %>%
-  dplyr::select(., ensbl = ensembl_gene_id, gene = hgnc_symbol)
-
-GOI_PE_DOWN <- data.frame(ensbl=c("ENSG00000233913", "ENSG00000134548",
-                                  "ENSG00000203859", "ENSG00000213088",
-                                  "ENSG00000114473", "ENSG00000260719",
-                                  "ENSG00000091137", "ENSG00000157064"),
-                  gene=c("RPL10P9", "SPX", "HSD3B2", "ACKR1",
-                         "IQCG", "AC009133.17", "SLC26A4", "NMNAT2"),
-                  direction = "down")
-
-GOI_UP_DOWN <- rbind(GOI_PE_UP, GOI_PE_DOWN)
 
 samples <- dge_list_obj$samples
-
-counts <- edgeR::cpm(dge_list_obj, log = TRUE)
-
 pd <- position_dodge(width = 0.5)
 
 lcpm <- edgeR::cpm(dge_list_obj, log = TRUE)
 
-## Print all of the plots at once
-for (i in 1:nrow(GOI_PE_UP)) {
-melt_lcpm <- melt(subset(lcpm, rownames(lcpm) %in% GOI_PE_UP$ensbl[i])) %>% 
+## Print all of the DE Up plots at once
+for (i in 1:nrow(GOI_PE_male_UP)) {
+melt_lcpm <- melt(subset(lcpm, rownames(lcpm) %in% GOI_PE_male_UP$ensbl[i])) %>% 
   as.data.frame() %>% 
   set_colnames(c("ensbl", "samplename", "log2cpm")) %>% 
-  # tibble::rownames_to_column("samplename") %>% 
-  left_join(., dge_list_obj$samples[, c("samplename", "Outcome", "Sex")], by = "samplename") 
-  
-beeswarm <- ggplot(melt_lcpm, aes(x = Sex,
-                                y = log2cpm,
-                                fill = Outcome)) +
-  stat_boxplot(geom="errorbar",
+  left_join(., dge_list_obj$samples[, c("samplename", "Outcome", "Sex")], by = "samplename")  
+
+png(filename=file.path(outdir_deUp, paste(GOI_PE_male_UP$ensbl[i], GOI_PE_male_UP$gene[i], "png",sep = ".")),
+    width=800,
+    height=800) 
+
+beeswarm <- ggplot(melt_lcpm %>% dplyr::mutate(., sex_outcome = paste(Sex, Outcome, sep = "_")),
+       aes(x = sex_outcome,
+                      y = log2cpm,
+                      label = samplename)) +
+  stat_boxplot(geom = "errorbar",
                position = pd,
                width = 0.2) +
   geom_boxplot(width = 0.5,
                position = pd) +
-  #     geom_boxplot(aes(x = Fetal.Sex,
-  #                  y =  log2cpm,
-  #                  fill = simpleOutcome)) +
   stat_summary(fun = mean,
                geom = "point",
                size=2,
                shape = 5,
                position = position_dodge(0.5)) +
-  geom_beeswarm(dodge.width = 0.6, cex = 2) +
+  geom_point(position = position_jitter(width = 0.1),
+             aes(x = sex_outcome,
+                 y = log2cpm,
+                 colour = Outcome)) +
+  stat_summary(fun = mean,
+               geom = "point",
+               size=2,
+               shape = 5,
+               position = position_dodge(0.5)) +
+  geom_text_repel(data = melt_lcpm %>% dplyr::mutate(., sex_outcome = paste(Sex, Outcome, sep = "_")),
+                  aes(label = samplename,
+                      colour = Outcome),
+                  box.padding = unit(0.3, "lines"),
+                  point.padding = unit(0.5, "lines"),
+                  max.overlaps = Inf,
+                  # fill = "white",
+                  segment.color = "black",
+                  segment.size = 0.5) +
   theme_bw(base_size = 18) +
-  ylab(paste("log2 CPM Counts", GOI_PE_UP$ensbl[i], GOI_PE_UP$gene[i], sep = " - ")) +
+  ggtitle(paste(GOI_PE_male_UP$ensbl[i], GOI_PE_male_UP$gene[i], sep = " - ")) +
+  ylab(paste("log2 CPM")) +
   theme(axis.text.x = element_text(colour = "black")) +
   theme(legend.position = "bottom")
 print(beeswarm)
+graphics.off()
 }
 
-# graphics.off()
+## Print all of the DE Down plots at once
+for (i in 1:nrow(GOI_PE_male_DOWN)) {
+melt_lcpm <- melt(subset(lcpm, rownames(lcpm) %in% GOI_PE_male_DOWN$ensbl[i])) %>% 
+  as.data.frame() %>% 
+  set_colnames(c("ensbl", "samplename", "log2cpm")) %>% 
+  left_join(., dge_list_obj$samples[, c("samplename", "Outcome", "Sex")], by = "samplename")  
+
+png(filename=file.path(outdir_deUp, paste(GOI_PE_male_DOWN$ensbl[i], GOI_PE_male_DOWN$gene[i], "png",sep = ".")),
+    width=800,
+    height=800) 
+
+beeswarm <- ggplot(melt_lcpm %>% dplyr::mutate(., sex_outcome = paste(Sex, Outcome, sep = "_")),
+       aes(x = sex_outcome,
+                      y = log2cpm,
+                      label = samplename)) +
+  stat_boxplot(geom = "errorbar",
+               position = pd,
+               width = 0.2) +
+  geom_boxplot(width = 0.5,
+               position = pd) +
+  stat_summary(fun = mean,
+               geom = "point",
+               size=2,
+               shape = 5,
+               position = position_dodge(0.5)) +
+  geom_point(position = position_jitter(width = 0.1),
+             aes(x = sex_outcome,
+                 y = log2cpm,
+                 colour = Outcome)) +
+  stat_summary(fun = mean,
+               geom = "point",
+               size=2,
+               shape = 5,
+               position = position_dodge(0.5)) +
+  geom_text_repel(data = melt_lcpm %>% dplyr::mutate(., sex_outcome = paste(Sex, Outcome, sep = "_")),
+                  aes(label = samplename,
+                      colour = Outcome),
+                  box.padding = unit(0.3, "lines"),
+                  point.padding = unit(0.5, "lines"),
+                  max.overlaps = Inf,
+                  # fill = "white",
+                  segment.color = "black",
+                  segment.size = 0.5) +
+  theme_bw(base_size = 18) +
+  ggtitle(paste(GOI_PE_male_DOWN$ensbl[i], GOI_PE_male_DOWN$gene[i], sep = " - ")) +
+  ylab(paste("log2 CPM")) +
+  theme(axis.text.x = element_text(colour = "black")) +
+  theme(legend.position = "bottom")
+print(beeswarm)
+graphics.off()
+}
+
 ```
 
 ## Volcano plot for visualisation of differential expression
