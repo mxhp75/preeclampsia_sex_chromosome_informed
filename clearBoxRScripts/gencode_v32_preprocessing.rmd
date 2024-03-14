@@ -66,9 +66,9 @@ gencode_v32_gene_id_symbol_chr_biotype <- gencode_v32_gene_id_symbol_chr_biotype
 ```{r}
 
 # save a csv of the combined raw counts table
-readr::write_csv(data.frame(gencode_v32_gene_id_symbol_chr_biotype),
-          file = outfile,
-          col_names = TRUE)
+# readr::write_csv(data.frame(gencode_v32_gene_id_symbol_chr_biotype),
+#           file = outfile,
+#           col_names = TRUE)
 
 ```
 

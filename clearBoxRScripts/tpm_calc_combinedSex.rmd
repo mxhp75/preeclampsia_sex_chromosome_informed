@@ -203,38 +203,6 @@ rpkm <- rpkm(y)
 tpm <- t( t(rpkm) / colSums(rpkm) ) * 1e6
 # These TPM values now incorporate the TMM factors
 
-# I'll output this for use with CIBERSORTx
-# small_tpm <- tpm[, 1:4]
-# male_tpm <- tpm[, male$samplename]
-# female_tpm <- tpm[, female$samplename]
-# 
-# 
-# male_tpm %>%
-#   tibble::as_tibble(rownames = NA) %>%
-#   tibble::rownames_to_column(var = "gene") %>% 
-#   # remove the number after the period
-#   tidyr::separate(., col = gene, into = c("gene", "right")) %>% 
-#   dplyr::select(., -right) %>%
-#   # save TPM count file for CIBERSTORTx
-#   write.table(file = output_male_cibersort_file,
-#               quote = FALSE,
-#               sep = "\t",
-#               col.names = TRUE,
-#               row.names = FALSE)
-# 
-# female_tpm %>%
-#   tibble::as_tibble(rownames = NA) %>%
-#   tibble::rownames_to_column(var = "gene") %>% 
-#   # remove the number after the period
-#   tidyr::separate(., col = gene, into = c("gene", "right")) %>% 
-#   dplyr::select(., -right) %>%
-#   # save TPM count file for CIBERSTORTx
-#   write.table(file = output_female_cibersort_file,
-#               quote = FALSE,
-#               sep = "\t",
-#               col.names = TRUE,
-#               row.names = FALSE)
-
 ```
 
 ## lets add the gene name information
