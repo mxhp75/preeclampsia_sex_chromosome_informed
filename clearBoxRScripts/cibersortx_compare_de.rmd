@@ -6,6 +6,7 @@ output: html_document
 ---
 
 # Load required libraries
+
 ```{r load Libraries}
 library(plyr)
 library(reshape2)
@@ -89,15 +90,16 @@ cibersortx_sigMatrix <- cibersortx_sigMatrix[rowSums(cibersortx_sigMatrix[,-1])>
 
 ```
 
-### Plot cell-type proportions
+# Cibersortx Cell-Type Proportions
+## Plot cell-type proportions
 
 ```{r}
 # which cell types are the most abundent
 ordered_celltypes <- data.frame(proportion = 
   colSums(cibersortx_proportion[, -1])[order(colSums(cibersortx_proportion[, -1]),
-                                             decreasing = TRUE)]
-  ) %>%
-  tibble::rownames_to_column("cell_type")
+                                             decreasing = TRUE)]) %>%
+  # use the tibble package to rownames into the column names cell_type
+  tibble::rownames_to_column("cell_type") 
   
 # convert proportions table to long table format
 data_long <- tidyr::pivot_longer(cibersortx_proportion,
@@ -120,7 +122,7 @@ ggplot(data_long, aes(x = samplename, y = proportion, fill = cell_type)) +
 # Reorder samplenames based on the proportion of Fetal Cytotrophoblasts
 ordered_samples_fetal_CTB <- dplyr::filter(data_long, cell_type == "Fetal.Cytotrophoblasts") %>%
   arrange(desc(proportion)) %>%
-  pull(samplename)
+  dplyr::pull(samplename)
 
 # Replot proprtions based on the proportion of Fetal B Cells
 png(filename=file.path(outdir, 'cibersortx_decon_CTB.png'), width=1200, height=800)
@@ -138,7 +140,7 @@ graphics.off()
 # Reorder samplenames based on the proportion of Maternal FCGR3A+ Monocytes
 ordered_samples_maternal_mono <- dplyr::filter(data_long, cell_type == "Maternal.FCGR3A..Monocytes") %>%
   arrange(desc(proportion)) %>%
-  pull(samplename)
+  dplyr::pull(samplename)
 
 # Replot proprtions based on the proportion of Maternal FCGR3A+ Monocytes
 png(filename=file.path(outdir, 'cibersortx_decon_mat_mono.png'), width=1200, height=800)
@@ -156,7 +158,7 @@ graphics.off()
 # Reorder samplenames based on the proportion of Maternal.Naive.CD8..T.Cells
 ordered_samples_maternal_CD8_tcells <- dplyr::filter(data_long, cell_type == "Maternal.Naive.CD8..T.Cells") %>%
   arrange(desc(proportion)) %>%
-  pull(samplename)
+  dplyr::pull(samplename)
 
 # Replot proprtions based on the proportion of Maternal FCGR3A+ Monocytes
 png(filename=file.path(outdir, 'cibersortx_decon_mat_CD8_tcells.png'), width=1200, height=800)
@@ -173,10 +175,6 @@ ggplot(data_long, aes(x = factor(samplename, levels = ordered_samples_maternal_C
   theme(axis.text.x = element_text(angle = 90, hjust = 1))
 graphics.off()
 
-
-
-
-
 # Heatmap of cell-type proportions
 # add column annotation for maternal v fetal cells
 # add row annotation for male v female samples
@@ -189,8 +187,6 @@ row_anno <- metadata_quality %>%
 column_anno <- data.frame(cell_type = colnames(cibersortx_sigMatrix[,-1]),
                           compartment = as.factor(colnames(cibersortx_sigMatrix[,-1]))) %>%
   tibble::column_to_rownames("cell_type")
-
-library(stringr)
 
 # Split column names at the first period and extract the first element
 compartment <- str_split_fixed(colnames(cibersortx_sigMatrix[, -1]), "\\.", n = 2)[, 1]
@@ -212,6 +208,34 @@ pheatmap::pheatmap(cibersortx_proportion %>% tibble::column_to_rownames("samplen
 graphics.off()
 
 ```
+
+## Correlation of cell-type proportions between samples
+
+```{r}
+# Assuming your data table is named 'data_table'
+# Assuming 'samplename' column contains the sample names
+
+# Extract cell names
+cell_names <- c("Fetal.Mesenchymal.Stem.Cells", "Fetal.CD14..Monocytes")  # Add more cell names if needed
+
+# Loop through each cell type
+for (cell in cell_names) {
+  # Subset data for the current cell type
+  cell_data <- cibersortx_proportion[, c("samplename", cell)]
+  
+  # Pivot the data to have sample names as row names
+  cell_data_pivot <- spread(cell_data, key = "samplename", value = cell)
+  
+  # Calculate correlation matrix
+  correlation_matrix <- cor(cell_data_pivot)
+  
+  # Print correlation matrix for the current cell type
+  cat("\nCorrelation matrix for", cell, ":\n")
+  print(correlation_matrix)
+}
+
+```
+
 
 # Sanity plot of genes
 ## PE associated genes from the literature
@@ -256,7 +280,7 @@ melt_lcpm <- melt(subset(lcpm, rownames(lcpm) %in% GOI_PE_UP$ensbl[i])) %>%
   as.data.frame() %>% 
   set_colnames(c("ensbl", "samplename", "log2cpm")) %>% 
   # tibble::rownames_to_column("samplename") %>% 
-  left_join(., dge_list_obj$samples[, c("samplename", "sex_outcome", "Sex")], by = "samplename") 
+  dplyr::left_join(., dge_list_obj$samples[, c("samplename", "sex_outcome", "Sex")], by = "samplename") 
 
 png(filename=file.path(outdir_literatureUp, paste(GOI_PE_UP$ensbl[i], GOI_PE_UP$gene[i], "png",sep = ".")),
     width=800,
@@ -292,7 +316,7 @@ melt_lcpm <- melt(subset(lcpm, rownames(lcpm) %in% GOI_PE_DOWN$ensbl[i])) %>%
   as.data.frame() %>% 
   set_colnames(c("ensbl", "samplename", "log2cpm")) %>% 
   # tibble::rownames_to_column("samplename") %>% 
-  left_join(., dge_list_obj$samples[, c("samplename", "sex_outcome", "Sex")], by = "samplename") 
+  dplyr::left_join(., dge_list_obj$samples[, c("samplename", "sex_outcome", "Sex")], by = "samplename") 
 
 png(filename=file.path(outdir_literatureDown, paste(GOI_PE_DOWN$ensbl[i], GOI_PE_DOWN$gene[i], "png",sep = ".")),
     width=800,
@@ -331,12 +355,12 @@ graphics.off()
 GOI_PE_male_UP <- topTable_male %>%
   dplyr::filter(logFC > 0 & AveExpr > 3) %>%
   dplyr::select(ensbl = ensembl_gene_id, gene = hgnc_symbol) %>%
-  mutate(direction = "up")
+  dplyr::mutate(direction = "up")
 
 GOI_PE_male_DOWN <- topTable_male %>%
   dplyr::filter(logFC < 0 & AveExpr > 3) %>%
   dplyr::select(ensbl = ensembl_gene_id, gene = hgnc_symbol) %>%
-  mutate(direction = "down")
+  dplyr::mutate(direction = "down")
 
 
 samples <- dge_list_obj$samples
@@ -346,10 +370,10 @@ lcpm <- edgeR::cpm(dge_list_obj, log = TRUE)
 
 ## Print all of the DE Up plots at once
 for (i in 1:nrow(GOI_PE_male_UP)) {
-melt_lcpm <- melt(subset(lcpm, rownames(lcpm) %in% GOI_PE_male_UP$ensbl[i])) %>% 
+melt_lcpm <- reshape2::melt(subset(lcpm, rownames(lcpm) %in% GOI_PE_male_UP$ensbl[i])) %>% 
   as.data.frame() %>% 
   set_colnames(c("ensbl", "samplename", "log2cpm")) %>% 
-  left_join(., dge_list_obj$samples[, c("samplename", "Outcome", "Sex")], by = "samplename")  
+  dplyr::left_join(., dge_list_obj$samples[, c("samplename", "Outcome", "Sex")], by = "samplename")  
 
 png(filename=file.path(outdir_deUp, paste(GOI_PE_male_UP$ensbl[i], GOI_PE_male_UP$gene[i], "png",sep = ".")),
     width=800,
@@ -398,12 +422,12 @@ graphics.off()
 
 ## Print all of the DE Down plots at once
 for (i in 1:nrow(GOI_PE_male_DOWN)) {
-melt_lcpm <- melt(subset(lcpm, rownames(lcpm) %in% GOI_PE_male_DOWN$ensbl[i])) %>% 
+melt_lcpm <- reshape2::melt(subset(lcpm, rownames(lcpm) %in% GOI_PE_male_DOWN$ensbl[i])) %>% 
   as.data.frame() %>% 
   set_colnames(c("ensbl", "samplename", "log2cpm")) %>% 
-  left_join(., dge_list_obj$samples[, c("samplename", "Outcome", "Sex")], by = "samplename")  
+  dplyr::left_join(., dge_list_obj$samples[, c("samplename", "Outcome", "Sex")], by = "samplename")  
 
-png(filename=file.path(outdir_deUp, paste(GOI_PE_male_DOWN$ensbl[i], GOI_PE_male_DOWN$gene[i], "png",sep = ".")),
+png(filename=file.path(outdir_deDown, paste(GOI_PE_male_DOWN$ensbl[i], GOI_PE_male_DOWN$gene[i], "png",sep = ".")),
     width=800,
     height=800) 
 
@@ -591,6 +615,30 @@ ggsave(plot = volcano_female,
        width = 12,
        height = 12,
        dpi = 300)
+
+
+```
+
+## DE genes overlap with signature matrix
+
+```{r}
+# lets take a look at the DE topTable and see how many of the DE genes are part of the signature matrix
+sig_de_overlap <- subset(cibersortx_sigMatrix, GeneSymbol %in% topTable_male$hgnc_symbol)
+
+# lets take a look at IGFBP7 and CD44
+# in both genes SCP4157 is highly expressed and seems to be driving the DE
+# also, in both genes STP0148 is more lowly expressed than the other PE boys.
+
+melt_lcpm <- reshape2::melt(subset(lcpm, rownames(lcpm) %in% "ENSG00000026508")) %>% 
+  as.data.frame() %>% 
+  set_colnames(c("ensbl", "samplename", "log2cpm")) %>% 
+  dplyr::left_join(., dge_list_obj$samples[, c("samplename", "Outcome", "Sex")], by = "samplename") %>%
+  dplyr::left_join(., cibersortx_proportion[, c("samplename", "Maternal.CD8..Activated.T.Cells")], by = "samplename")
+
+ggplot2::ggplot(data = melt_lcpm,
+                aes(x = Maternal.CD8..Activated.T.Cells,
+                    y = log2cpm)) +
+  geom_point()
 
 
 ```

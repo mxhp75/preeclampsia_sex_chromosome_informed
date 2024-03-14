@@ -14,7 +14,6 @@ knitr::opts_chunk$set(
     fig.align = "center",
     results = "hide"
 )
-
 ```
 
 # Load required libraries
@@ -24,13 +23,20 @@ library(plyr)
 library(reshape2)
 library(dplyr)
 library(stringr)
+library(tidyr)
+library(magrittr)
+
 library(edgeR)
+
 library(readxl)
 library(readr)
-library(magrittr)
+
 library(FactoMineR)
 library(factoextra)
 library(corrplot)
+
+library(ggplot2)
+library(ggrepel)
 
 
 # set project directory
@@ -45,6 +51,7 @@ gene_info_file <- file.path(projectDir, "clearBoxRawData/gene_id_vs_symbol.csv")
 rnaQuality_infile <- file.path(projectDir, "clearBoxRawData/rin_conc.xlsx")
 
 outdir <- file.path(projectDir, paste0(expt_name, "_output"))
+metadata_quality_outfile <- file.path(projectDir, "clearBoxCleanData/metadata_quality.csv")
 # output_spreadsheet_file <- file.path(outdir, paste0(expt_name, "_.csv"))
 
 dir.create(outdir)
@@ -128,21 +135,58 @@ metadata_quality <- dplyr::left_join(metadata, rna_quality, by = "samplename") %
   dplyr::mutate(., days_diff = difftime(Sys.Date(), deliveryDate, units = "days")) %>%
   # add the "time to freezer" information
   dplyr::left_join(., combined_placentaFreezerSamples, by = "samplename")
+
+# readr::write_csv(metadata_quality,
+#                  file = metadata_quality_outfile)
 ```
 
 ### plot the quality and delivery date information
 
 ```{r}
+# plot the distribution of RQIs by cohort
+metadata_quality %>%
+  ggplot(aes(x = RQI,
+             colour = cohort,
+             fill = cohort,
+             alpha = 0.5)) +
+  geom_density() +
+  ggtitle("Distribution of RQIs by Cohort")
+```
 
+```{r}
+# is there any confounding of RQI and sex_outcome?
+# png(filename=file.path(outdir, 'RQI_as_function_of_sexOutcome.png'), width=800, height=800)
+metadata_quality %>%
+  ggplot(aes(x = sex_outcome, y = RQI, colour = sex_outcome)) +
+  geom_boxplot(width = 0.5, outlier.shape = NA) +  # Box plot
+  geom_jitter(aes(color = sex_outcome), position = position_jitter(0.2), size = 2, alpha = 0.7) +  # Scatter plot
+  labs(title = "RQI as a function of sex and outcome", x = "Fetal sex and pregnancy outcome", y = "RQI") +
+  geom_hline(yintercept = 8, colour = "orange", linetype = "dashed") +
+    geom_text_repel(aes(label = samplename),
+                    size = 4,
+                    nudge_x = 0.1,
+                    nudge_y = 0.1)
+
+# graphics.off()
+```
+- RQI doesn't appear to be confounded by sex_outcome.  
+- This is a bit hard to assess because there are so few PE males.  
+
+```{r}
 # using the original delivery date (as a proxy for how old the samples are) how does sample age relate to sample RQI
 metadata_quality %>%
-  ggplot(aes(x = deliveryDate,
+  ggplot(aes(x = deliveryDate.x,
              y = RQI,
              size = 6)) +
   geom_point(aes(shape = factor(cohort),
                  colour = Conc)) +
-  facet_wrap(vars(cohort), scales = "free")
+  facet_wrap(vars(cohort), scales = "free_x") +
+  ggtitle("RQI as a function of delivery date and cohort")
+```
 
+- The range of RQIs between SCOPE and STOP appears very similar.  
+
+```{r}
 # how does RNA quality (RQI) relate to the concentration of RNA
 metadata_quality %>%
   ggplot(aes(x = Conc,
@@ -150,8 +194,15 @@ metadata_quality %>%
   geom_point(aes(colour = factor(cohort))) +
   geom_smooth(aes(group = cohort,
                   colour = cohort),
-              method = lm)
+              method = lm) +
+  geom_text_repel(aes(label = samplename), size = 3, nudge_x = 0.1, nudge_y = 0.1)
 
+
+```
+- There is not a strong correlation between concentration and RQI in either SCOPE or STOP. 
+- Not sure what is going on with samples SCP4733 & STP0932 which have both a high RQI and high loaded concentration.  
+
+```{r}
 # use the original delivery date to calculate the age of the sample and re-plot against RQN and concentration
 metadata_quality %>%
   ggplot(aes(x = as.numeric(days_diff),
@@ -160,9 +211,14 @@ metadata_quality %>%
   geom_smooth(aes(group = cohort,
                   colour = cohort),
               method = lm) +
-  facet_wrap(vars(cohort), scales = "free")
+  scale_x_reverse() +
+  facet_wrap(vars(cohort), scales = "free_x")
+```
+- RQI appears to increase over time in SCOPE and decrease over time in STOP but, this is quite minor.  
+- There doesn't seem to be a strong correlation between RNA concentration and RQI in either SCOPE or STOP.  
 
-# does the time to freezer (days) appear to correlate with the RQI or concentration?
+```{r}
+# does the time to freezer (days) appear to correlate with the RQI?
 metadata_quality %>%
   ggplot(aes(x = as.numeric(days_to_freezer),
              y = RQI)) +
@@ -170,8 +226,13 @@ metadata_quality %>%
   geom_smooth(aes(group = cohort,
                   colour = cohort),
               method = lm) +
-  facet_wrap(vars(cohort), scales = "free")
+  facet_wrap(vars(cohort), scales = "free_x") +
+  geom_text_repel(aes(label = samplename))
+```
+- In both SCOPE and STOP there appears to be a positive correlation between RQI and the time the sample sat in RNAlater before being put in the -80c freezer.  
 
+```{r}
+# does the time to freezer (days) appear to correlate with the concentration?
 metadata_quality %>%
   ggplot(aes(x = as.numeric(days_to_freezer),
              y = Conc)) +
@@ -179,7 +240,89 @@ metadata_quality %>%
   geom_smooth(aes(group = cohort,
                   colour = cohort),
               method = lm) +
-  facet_wrap(vars(cohort), scales = "free")
+  facet_wrap(vars(cohort), scales = "free_x")
+```
+- there doesn't appear to be a strong correlation between time to freezer and RNA concentration. 
+
+## CIBERSORTx cell-type proportions
+### Import CIBERSORTx cell-type proportions
+
+```{r}
+
+# import CIBERSORTx cell-type proportion data
+cibersortx_proportion <- read_delim(file = file.path(projectDir, "cibersortx/outdir/CIBERSORTx_Adjusted.txt")) %>%
+  dplyr::select(., samplename = Mixture, everything()) %>%
+  dplyr::select(., -'P-value', -'Correlation', -'RMSE')
+
+```
+
+### Plot cell-type proportions
+
+```{r}
+# convert to long table format
+data_long <- pivot_longer(cibersortx_proportion,
+                          cols = colnames(cibersortx_proportion[, !colnames(cibersortx_proportion) %in% "samplename"]),
+                          names_to = "cell_type",
+                          values_to = "proportion")
+
+# Generate 27 distinct colors from the viridis palette
+my_palette <- colorspace::rainbow_hcl(27)
+
+# Plot the stacked bar chart (not ordered)
+ggplot(data_long, aes(x = samplename, y = proportion, fill = cell_type)) +
+  geom_bar(stat = "identity") +
+  labs(title = "CIBERSORTx Deconvolution", x = "Samplename", y = "Cell-Type Proportion") +
+  theme_minimal() +
+  theme(legend.position = "right") +
+  scale_fill_manual(values = my_palette) +
+  theme(axis.text.x = element_text(angle = 90, hjust = 1))
+
+# Reorder samplenames based on the proportion of Fetal Cytotrophoblasts
+ordered_samples_fetal_CTB <- dplyr::filter(data_long, cell_type == "Fetal Cytotrophoblasts") %>%
+  arrange(desc(proportion)) %>%
+  pull(samplename)
+
+# Replot prooprtions based on the proportion of Fetal B Cells
+ggplot(data_long, aes(x = factor(samplename, levels = ordered_samples_fetal_CTB), y = proportion, fill = cell_type)) +
+  geom_bar(stat = "identity") +
+  labs(title = "CIBERSORTx Deconvolution", x = "Samplename (ordered fetal CTB", y = "Cell-Type Proportion") +
+  theme_minimal() +
+  theme(legend.position = "right") +
+  # scale_fill_manual(values = my_palette) +
+  theme(axis.text.x = element_text(angle = 90, hjust = 1))
+
+# Reorder samplenames based on the proportion of Maternal FCGR3A+ Monocytes
+ordered_samples_maternal_mono <- dplyr::filter(data_long, cell_type == "Maternal FCGR3A+ Monocytes") %>%
+  arrange(desc(proportion)) %>%
+  pull(samplename)
+
+# Replot prooprtions based on the proportion of Maternal FCGR3A+ Monocytes
+ggplot(data_long, aes(x = factor(samplename, levels = ordered_samples_maternal_mono), y = proportion, fill = cell_type)) +
+  geom_bar(stat = "identity") +
+  labs(title = "CIBERSORTx Deconvolution", x = "Samplename (Maternal FCGR3A+ Monocytes)", y = "Cell-Type Proportion") +
+  theme_minimal() +
+  theme(legend.position = "right") +
+  # scale_fill_manual(values = my_palette) +
+  theme(axis.text.x = element_text(angle = 90, hjust = 1))
+
+# Heatmap of cell-type proportions
+# add column annotation for maternal v fetal cells
+# add row annotation for male v female samples
+# add row annotation for PE v Uncomplicated
+
+row_anno <- metadata_quality %>%
+  dplyr::select(., samplename, Sex, Outcome, sex_outcome) %>%
+  tibble::column_to_rownames("samplename")
+
+column_anno <- metadata_quality %>%
+  dplyr::select(., samplename, sex_outcome) %>%
+  tibble::column_to_rownames("samplename")
+
+png(filename=file.path(outdir, 'cibersortx_heatmap_row_anno.png'), width=800, height=800)
+pheatmap::pheatmap(cibersortx_proportion %>% tibble::column_to_rownames("samplename"),
+                   annotation_row = row_anno,
+                   scale = "row")
+graphics.off()
 
 ```
 
@@ -222,8 +365,8 @@ heatmap_df_i90pr <- t(scale(t(top_genes_i90pr),
 
 
 # set up the column annotations
-col_anno <- data.frame(metadata_quality) %>% 
-  dplyr::select(., samplename, Outcome, cohort, SmokingStatus, RQI, Conc, sex_outcome) %>%
+col_anno <- data.frame(lity) %>% 
+  dplyr::select(., samplename, Sex, Outcome, cohort, SmokingStatus, RQI, Conc) %>%
   tibble::column_to_rownames("samplename")
 
 
@@ -263,15 +406,102 @@ heatmap_df_iqr <- t(scale(t(top_genes_df_iqr),
 
 # plot the heatmap
 par(mar=c(6,2,2,1)+0.1) 
-# png(filename=file.path(paste0(outdir, '/heatmap_iqr_CPM.png')), width=800, height=1000)
+# png(filename=file.path(outdir, 'heatmap_iqr_CPM.png'), width=800, height=1000)
 pheatmap::pheatmap(heatmap_df_iqr,
                    annotation_col = col_anno,
                    show_rownames = FALSE,
                    scale = "none",
                    cluster_rows = TRUE,
                    cluster_cols = TRUE,
-                   main = "iqr male")
+                   main = "iqr")
 # graphics.off()
+```
+
+```{r}
+# Calculate the genes with the highest variability
+# Calculate the standard deviation for each gene
+gene_sd <- apply(log2CPM, 1, sd)
+
+# Sort genes based on standard deviation in descending order
+sorted_genes <- names(sort(gene_sd, decreasing = TRUE))
+
+# Select the top 100 most variable genes
+top_100_variable_genes <- sorted_genes[1:100]
+
+# Subset the original expression matrix to include only the top 100 genes
+expression_matrix_top_100 <- log2CPM[top_100_variable_genes, ]
+
+heatmap_df_100 <- t(scale(t(expression_matrix_top_100),
+                      center=TRUE,
+                      scale=TRUE))
+
+# plot the heatmap
+par(mar=c(6,2,2,1)+0.1) 
+# png(filename=file.path(outdir, 'heatmap_100_SD_log2CPM.png'), width=800, height=1000)
+pheatmap::pheatmap(heatmap_df_100,
+                   annotation_col = col_anno,
+                   show_rownames = FALSE,
+                   scale = "none",
+                   cluster_rows = TRUE,
+                   cluster_cols = TRUE,
+                   main = "100 most variable by SD")
+# graphics.off()
+
+# PCA with top 5000 genes, all male samples
+res_100_SD <- FactoMineR::PCA(
+  heatmap_df_100 %>%
+    as.data.frame() %>%
+    tibble::rownames_to_column(var='gene') %>%
+    tibble::column_to_rownames(var='gene') %>%
+    as.matrix() %>%
+    t(),
+  ncp = 50,
+  graph = FALSE
+)
+
+# add the supplementary variables to the logged counts table
+lcpm_supp <- heatmap_df_100 %>%
+    as.data.frame() %>%
+    tibble::rownames_to_column(var='gene') %>%
+  # keep only top 2000 genes
+    # dplyr::filter(gene %in% top_2000_genes_iqr) %>%
+    tibble::column_to_rownames(var='gene') %>%
+    as.matrix() %>%
+    t() %>%
+  as.data.frame() %>%
+  tibble::rownames_to_column("samplename") %>%
+  # add the supplementary variables
+  dplyr::left_join(., dplyr::select(lity, samplename, GestationalAge, maternalAge, BMI, Birthweight, RQI, Conc,
+                                    cohort, Outcome, Ethnicity, SmokingStatus, Sex),
+                   by = "samplename") %>%
+  # move samplename back into the rownames
+  tibble::column_to_rownames("samplename")
+
+# PCA with top 2000 genes, all samples and added supp variables
+res_supp <- FactoMineR::PCA(lcpm_supp,
+                            # add columns for quantitative variables
+                            quanti.sup = 101:106,
+                            # add columns for qualitative variables
+                            quali.sup = 107:111,
+                            ncp = 50,
+                            graph = FALSE)
+# print summary of results for all individuals
+summary(res_supp, nbelements = Inf)
+
+# plot PCA for indivuals
+plot(res_supp,
+     cex = 0.8,
+     invisible = "quali",
+     title = "Individuals PCA Graph")
+
+# plot PCA for dim1:2
+plot(res_supp,
+     choix = "ind",
+     cex = 0.8,
+     habillage = "Sex",
+     invisible = "quali",
+     title = "Individual PCA (dim 1:2)",
+     axes = 1:2)
 
 ```
 
@@ -318,7 +548,7 @@ lcpm_supp <- scaled_log2CPM %>%
   as.data.frame() %>%
   tibble::rownames_to_column("samplename") %>%
   # add the supplementary variables
-  dplyr::left_join(., dplyr::select(metadata_quality, samplename, GestationalAge, maternalAge, BMI, Birthweight, RQI, Conc,
+  dplyr::left_join(., dplyr::select(lity, samplename, GestationalAge, maternalAge, BMI, Birthweight, RQI, Conc,
                                     cohort, Outcome, Ethnicity, SmokingStatus, Sex),
                    by = "samplename") %>%
   # move samplename back into the rownames
@@ -363,4 +593,194 @@ plotellipses(res_supp,
 plotellipses(res_supp,
              axes = c(3, 4))
 # graphics.off()
+```
+
+**Observation**: 
+**Observation**:
+**Observation**: 
+**Observation**: 
+**Observation**:  
+
+```{r, echo = FALSE}
+
+# plot PCA for dim1:2
+plot(res_supp,
+     choix = "ind",
+     cex = 0.8,
+     habillage = "cohort",
+     title = "Individual PCA (dim 1:2)",
+     axes = 1:2)
+
+plot(res_supp, choix = "ind", cex = 0.8)
+
+```
+**Observation**: 
+```{r, echo=FALSE}
+# plot PCA for dim2:3
+plot(res_supp,
+     choix = "ind",
+     cex = 0.8,
+     habillage = "cohort",
+     title = "Individual PCA (dim 2:3)",
+     axes = 2:3)
+    
+```
+
+```{r, echo=FALSE}
+     # plot PCA for dim3:4
+plot(res_supp,
+     choix = "ind",
+     cex = 0.8,
+     habillage = "cohort",
+     title = "Individual PCA (dim 3:4)",
+     axes = 3:4)
+```
+
+```{r, echo=FALSE}
+
+# plot(res_supp,
+#      choix = "var",
+#      cex = 0.8,
+#      title = "Variables PCA dim3:4",
+#      axes = 3:4)
+
+# which individuals contribute most to the PCs
+# plot(res_supp,
+#      cex = 0.8,
+#      habillage = "Outcome",
+#      select = "contrib 5")
+
+# which variables contribute the most to the PCs
+# plot(res_supp,
+#      choix = "var",
+#      select = "contrib 5")
+
+# Extract eigenvalues/variances
+get_eig(res_supp)
+
+# Visualize eigenvalues/variances as scree plot
+fviz_screeplot(res_supp,
+               addlabels = TRUE,
+               ylim = c(0, 50))
+```
+
+```{r, echo=FALSE}
+# Extract the results for individuals
+ind <- get_pca_ind(res_supp)
+ind
+
+# Coordinates of individuals
+head(ind$coord)
+
+# Graph of variables
+# get the pca variables
+var <- get_pca_var(res_supp)
+
+# pull out the cos2 data
+cos2_data <- data.frame(var$cos2) %>%
+  dplyr::arrange(desc(Dim.1)) %>%
+  # add gene name
+  tibble::rownames_to_column("ensembl_gene_id") %>%
+  dplyr::left_join(., gene_info, by = "ensembl_gene_id") %>%
+  tidyr::drop_na(.) %>%
+  tibble::column_to_rownames("hgnc_symbol") %>%
+  dplyr::select(-ensembl_gene_id)
+
+# plot cos2 (dim 1:5)
+# png(filename=file.path(paste0(outdir, '/cos2_dim1_3.png')), width=800, height=150)
+corrplot(t(cos2_data[1:50, 1:3]),
+         is.corr=FALSE,
+         title = "cos2 Dim 1:3",
+         mar = c(1,1,1,1))
+# graphics.off()
+
+# plot cos2 (dim 2:5)
+# png(filename=file.path(paste0(outdir, '/cos2_dim2_21.png')), width=800, height=400)
+corrplot(t(cos2_data[1:50, -1]),
+         is.corr=FALSE,
+         title = "cos2 Dim 2:21",
+         mar = c(1,1,1,1))
+# graphics.off()
+```
+
+```{r, echo=FALSE}
+# pull out the contribution data
+contrib_data <- data.frame(var$contrib) %>%
+  dplyr::arrange(desc(Dim.1)) %>%
+  # add gene name
+  tibble::rownames_to_column("ensembl_gene_id") %>%
+  dplyr::left_join(., gene_info, by = "ensembl_gene_id") %>%
+  tidyr::drop_na(.) %>%
+  tibble::column_to_rownames("hgnc_symbol") %>%
+  dplyr::select(-ensembl_gene_id)
+
+# plot contribution (dim 1:5)
+# png(filename=file.path(paste0(outdir, '/contrib_dim1_3.png')), width=800, height=150)
+corrplot(t(contrib_data[1:50, 1:3]),
+         is.corr=FALSE,
+         title = "contribution Dim 1:3",
+         mar = c(1,1,1,1))
+
+# plot contribution (dim 2:5)
+# png(filename=file.path(paste0(outdir, '/contrib_dim2_21.png')), width=800, height=400)
+corrplot(t(contrib_data[1:50, -1]),
+         is.corr=FALSE,
+         title = "contribution Dim 2:21",
+         mar = c(1,1,1,1))
+# graphics.off()
+```
+
+```{r, echo=FALSE}
+
+# plot cos2 qualitative variables
+# png(filename=file.path(paste0(outdir, '/cos2Quali_dim1_20.png')), width=400, height=800)
+corrplot(t(res_supp$quali.sup$cos2),
+         is.corr = FALSE,
+         title = "cos2 qualitative variables",
+         mar = c(1,1,1,1))
+```
+**Observation**:  
+
+```{r, echo=FALSE}
+
+# plot cos2 quantitative variables
+png(filename=file.path(outdir, 'cos2Quantitative_dim1_50.png'), width=400, height=800)
+corrplot(t(res_supp$quanti.sup$cos2),
+         is.corr = FALSE,
+         title = "cos2 quantitative variables",
+         mar = c(1,1,1,1))
+graphics.off()
+
+```
+**Observation**:  
+**Observation**:   
+**Observation**:  
+
+```{r, echo=FALSE}
+
+# get the individual contributions
+# plot individual contributions to PCs
+ind <- get_pca_ind(res_supp)
+png(filename=file.path(outdir, 'indivCos2_dim1_50.png'), width=400, height=400)
+corrplot(t(ind$cos2),
+         is.corr = FALSE,
+         title = "cos2 of Individuals",
+         mar = c(1,1,1,1))
+graphics.off()
+png(filename=file.path(outdir, 'indivContrib_dim1_20.png'), width=400, height=400)
+corrplot(t(ind$contrib),
+         is.corr = FALSE,
+         title = "Contribution of Individuals",
+         mar = c(1,1,1,1))
+graphics.off()
+```
+
+**Observation**:  
+
+### Session information
+
+```{r, sessionInfo}
+
+sessionInfo()
+
 ```

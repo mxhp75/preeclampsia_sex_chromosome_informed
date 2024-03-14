@@ -1,7 +1,7 @@
 ---
-title: "clearBoxDE"
+title: "clearBox_DE_RQI_cov"
 author: "Melanie Smith"
-date: "11 July 2023"
+date: "23 January 2024"
 output: html_document
 ---
 
@@ -17,7 +17,6 @@ library(readr)
 library(magrittr)
 library(tibble)
 library(ggplot2)
-library(ggbeeswarm)
 library(ggrepel)
 library(pheatmap)
 
@@ -25,23 +24,20 @@ library(pheatmap)
 projectDir <- "/home/smit1924/preeclampsia_sex_chromosome_informed"
 # projectDir <- "/Users/pillmaka/Desktop/Melanie/drive-download"
 
-# expt_name <- 'maternalAge'
-# expt_name <- 'maternalBMI'
-expt_name <- 'noCovariate'
-# expt_name <- 'interaction'
+expt_name <- 'RQI_Covariate'
+
 
 counts_geneID_file <- file.path(projectDir, "clearBoxRawData/rawCounts_melanie_v2.0.3.csv")
 
 gene_info_file <- file.path(projectDir, "clearBoxRawData/gene_id_vs_symbol.csv")
-metadata_file <- file.path(projectDir, "clearBoxRawData/cleanSampleMetadata.csv")
+metadata_quality_infile <- file.path(projectDir, "clearBoxCleanData/metadata_quality.csv")
 
-subsetGeneList_file <- file.path(projectDir, "clearBoxRawData/subsetGeneList.csv")
-outDesignMatrix_file <- file.path(projectDir, paste0("clearBoxRawData/", expt_name, "_design.csv"))
+outDesignMatrix_file <- file.path(projectDir, "clearBoxRawData", paste0(expt_name, "_design.csv"))
 
 outdir <- file.path(projectDir, paste0(expt_name, "_output"))
-output_spreadsheet_file <- file.path(outdir, paste0(expt_name, "filtered_DE.csv"))
-output_pValue_file <- file.path(outdir, paste0(expt_name, "pValue_DE.csv"))
-output_log2CPM_file <- file.path(outdir, paste0(expt_name, "log2CPM.csv"))
+output_spreadsheet_file <- file.path(outdir, paste0(expt_name, "_filtered_DE.csv"))
+output_pValue_file <- file.path(outdir, paste0(expt_name, "_pValue_DE.csv"))
+output_log2CPM_file <- file.path(outdir, paste0(expt_name, "_log2CPM.csv"))
 
 dir.create(outdir)
 
@@ -61,26 +57,23 @@ numSamples <- 5
 rawCounts <- read_csv(file = counts_geneID_file)
 
 ## Metadata
-metadata <- read_csv(file = metadata_file)
-
-## Gene ID versus GeneSymbol
-gene_info <- read_csv(file = gene_info_file)
+metadata_quality <- read_csv(file = metadata_quality_infile)
 
 ## Gene ID versus GeneSymbol
 gene_info <- read_csv(file = gene_info_file)
 gene_info <- gene_info[!duplicated(gene_info$ensembl_gene_id), ]
-
-
 ```
 
 ## Descriptives per group
 
 ```{r}
-group_by(metadata, sex_outcome) %>% 
+group_by(metadata_quality, sex_outcome) %>% 
 summarise(
   count = n(),
-  median = median(Birthweight, na.rm = TRUE),
-  iqr = IQR(Birthweight, na.rm = TRUE)
+  median_birthweight = median(Birthweight, na.rm = TRUE),
+  iqr_birthweight = IQR(Birthweight, na.rm = TRUE),
+  median_RQI = median(RQI, na.rm = TRUE),
+  iqr_RQI = IQR(RQI, na.rm = TRUE)
   )
 ```
 
@@ -90,7 +83,7 @@ summarise(
 # drop the samples not required for this analysis
 counts <- rawCounts %>%
   tibble::column_to_rownames("Geneid")
-counts <- counts[, metadata$samplename]
+counts <- counts[, metadata_quality$samplename]
 # drop rows with zero in all columns
 counts <- counts[rowSums(counts[])>0,] %>%
   tibble::rownames_to_column("ensembl_gene_id")
@@ -100,7 +93,7 @@ counts <- dplyr::left_join(counts, gene_info, by = "ensembl_gene_id") %>%
 dim(counts)
 # establish the DGEList
 dge_list_obj <- DGEList(counts = counts %>% tibble::column_to_rownames("ensembl_gene_id") %>% dplyr::select(., -hgnc_symbol),
-                           samples = metadata,
+                           samples = metadata_quality,
                            group = metadata$group,
                            genes = counts %>% dplyr::select(ensembl_gene_id, hgnc_symbol))
 
@@ -131,10 +124,6 @@ dge_list_obj <- calcNormFactors(dge_list_obj,
 # # set the new factor levels
 sex_outcome_levels <- c("F_Control", "M_Control", "F_PE", "M_PE")
 dge_list_obj$samples$sex_outcome <- factor(dge_list_obj$samples$sex_outcome, levels=sex_outcome_levels)
-
-## save the filtered and normalised DGEList object
-saveRDS(dge_list_obj,
-        file = file.path(outdir, "DGEList_filtered_normalised.rds"))
 ```
 
 # Calculate log2CPM and save table as .csv
@@ -151,103 +140,71 @@ log2CPM <- edgeR::cpm(dge_list_obj, log = TRUE)
 ```
 
 # Differential Expression
-- covariates are either  
-  - maternal age  
-  - maternal BMI  
+- RQI as covariate   
+ 
 ```{r}
-## No covariates
+
 #Create and write out design matrix
-model_noCovariate <- '~0 + sex_outcome'
+model_RQI_Covariate <- '~0 + sex_outcome + RQI'
 # establish the design matrix
-design_sex_PE <- model.matrix(formula(model_noCovariate),
+design_sex_PE_RQI <- model.matrix(formula(model_RQI_Covariate),
                               data = dge_list_obj$samples)
 # make the column names a little nicer
-colnames(design_sex_PE) <- c(sex_outcome_levels)
-
-
-## maternalAge only as covariate
-#Create and write out design matrix
-# model_maternalAge <- '~0 + sex_outcome + maternalAge'
-# establish the design matrix
-# design_sex_PE <- model.matrix(formula(model_maternalAge),
-#                               data = dge_list_obj$samples)
-# make the column names a little nicer
-# colnames(design_sex_PE) <- c(sex_outcome_levels, "maternalAge")
-
-## BMI only as covariate
-#Create and write out design matrix
-# model_maternalBMI <- '~0 + sex_outcome + BMI'
-# establish the design matrix
-# design_sex_PE <- model.matrix(formula(model_maternalBMI),
-#                               data = dge_list_obj$samples)
-# make the column names a little nicer
-# colnames(design_sex_PE) <- c(sex_outcome_levels, "BMI")
-
+colnames(design_sex_PE_RQI) <- c(sex_outcome_levels, "RQI")
 
 # save a csv of the design matrix
-# write_csv(data.frame(design_sex_PE) %>%
-#             tibble::rownames_to_column("samplename"),
-#           file = outDesignMatrix_file,
-#           col_names = TRUE)
+write_csv(data.frame(design_sex_PE_RQI) %>%
+            tibble::rownames_to_column("samplename"),
+          file = outDesignMatrix_file,
+          col_names = TRUE)
 ```
 
 ```{r}
 # perform the voom
-voom_sex_PE <- voom(dge_list_obj, design_sex_PE, plot = TRUE)
+voom_sex_PE_RQI <- voom(dge_list_obj, design_sex_PE_RQI, plot = TRUE)
 
 # fit the linear model
-fit_sex_PE <- lmFit(voom_sex_PE, design_sex_PE)
+fit_sex_PE_RQI <- lmFit(voom_sex_PE_RQI, design_sex_PE_RQI)
 ```
 
 ```{r}
 # set the contrasts - this makes it easier to "see" what we're testing
-contrast_sex_PE <- makeContrasts(female_PE = F_PE-F_Control,
-                                 male_PE = M_PE-M_Control,
-                                 levels = design_sex_PE)
-contrast_sex_PE
+contrast_sex_PE_RQI <- makeContrasts(female_PE = F_PE-F_Control,
+                                     male_PE = M_PE-M_Control,
+                                     levels = design_sex_PE_RQI)
+contrast_sex_PE_RQI
 
 # fit a linear regression to the contrast questions
-contrast_fit_sex_PE <- contrasts.fit(fit_sex_PE, contrast_sex_PE)
+contrast_fit_sex_PE_RQI <- contrasts.fit(fit_sex_PE_RQI, contrast_sex_PE_RQI)
 
 # perform bayesian adjustment
-contrast_fit_sex_PE <- eBayes(contrast_fit_sex_PE)
+contrast_fit_sex_PE_RQI <- eBayes(contrast_fit_sex_PE_RQI)
 ```
 
 ```{r}
 # summary table of the sex PE fit
-summary(decideTests(contrast_fit_sex_PE,
+summary(decideTests(contrast_fit_sex_PE_RQI,
                     adjust.method = "fdr",
                     p.value = 0.05))
 
 # all DE results for the female_PE comparison
-allTable_female_PE <- topTable(contrast_fit_sex_PE,
+allTable_female_PE_RQI <- topTable(contrast_fit_sex_PE_RQI,
                              coef = 1,
                              n = Inf,
                              sort = "p")
 # create output files and save
-write_csv(allTable_female_PE,
-          file="/home/smit1924/preeclampsia_sex_chromosome_informed/noCovariate_output/allTable_female.csv")
+write_csv(allTable_female_PE_RQI,
+          file = file.path(outdir, "allTable_female.csv"))
 
 
 # all DE results for the male comparison
-allTable_male_PE <- topTable(contrast_fit_sex_PE,
+allTable_male_PE_RQI <- topTable(contrast_fit_sex_PE_RQI,
                              coef = 2,
                              n = Inf,
                              sort = "p")
-write_csv(allTable_male_PE,
-          file="/home/smit1924/preeclampsia_sex_chromosome_informed/noCovariate_output/allTable_male.csv")
 
-
-topTable_male_pe <- topTable(contrast_fit_sex_PE,
-                             coef = 2,
-                             n = Inf,
-                             sort = "p",
-                             p = 0.05,
-                             adjust.method = "fdr")
-
-# create output files and save
-write_csv(topTable_male_pe,
-          file="/home/smit1924/preeclampsia_sex_chromosome_informed/noCovariate_output/topTable_male_pe.csv")
+write_csv(allTable_male_PE_RQI,
+          file = file.path(outdir, "allTable_male.csv"))
 
 # write out a few summary tables
 # df <- left_join(allTable_female_PE %>% dplyr::select(-t, -P.Value, -B),
@@ -274,102 +231,14 @@ write_csv(topTable_male_pe,
 # write_csv(df2 %>% relocate(hgnc_symbol, .after=ensembl_gene_id),
 #           file=output_pValue_file)
 
-```
+dplyr::left_join(allTable_male_PE_RQI[, c("ensembl_gene_id", "logFC")] %>%
+                   dplyr::select(ensembl_gene_id, male_logFC = logFC),
+                 allTable_female_PE_RQI[, c("ensembl_gene_id", "logFC")] %>%
+                   dplyr::select(ensembl_gene_id, female_logFC = logFC),
+                 by = "ensembl_gene_id") %>%
+ggplot(aes(x = male_logFC, y = female_logFC)) +
+  geom_point()
 
-## Sanity plot of DE genes
-
-```{r}
-# let's take a look at the DE genes with the highest logFC that also have a "decent" expression level
-
-# row center the counts
-# do this by subtracting the row(gene) mean from each count
-
-# center with 'scale()'
-# setting `scale = FALSE` subtracts the mean rather than zero centering
-center_scale <- function(x) {
-    scale(x, scale = FALSE)
-}
-
-# apply it
-row_centered_counts <- center_scale(t(dge_list_obj$counts)) %>% 
-  t()
-
-# which gene would we like to plot??
-gene_to_plot <- "ENSG00000047457"
-
-# png(filename=file.path(outdir, "expression_DE_gene_CP_sexOutcome.png'), width=800, height=800)
-# Gene of Interest (GOI)
-GOI_PE_UP <- data.frame(ensbl=c("ENSG00000178726", "ENSG00000115602",
-                             "ENSG00000174697", "ENSG00000070404",
-                             "ENSG00000169495", "ENSG00000136002",
-                             "ENSG00000012223", "ENSG00000142623",
-                             "ENSG00000224658", "ENSG00000102755",
-                             "ENSG00000118849", "ENSG00000165810",
-                             "ENSG00000211448", "ENSG00000243836",
-                             "ENSG00000150722", "ENSG00000181458",
-                             "ENSG00000159399"),
-                  gene=c("THBD", "IL1RL1", "LEP", "FSTL3",
-                         "HTRA4", "ARHGEF4", "LTF", "PADI1",
-                         "RP11-631F7.1", "FLT1", "RARRES1",
-                         "BTNL9", "DIO2", "WDR86-AS1", "PPP1R1C",
-                         "TMEM45A", "HK2"),
-                  direction = "up")
-
-GOI_PE_male_UP <- topTable_male_pe %>%
-  arrange(desc(logFC)) %>%
-  dplyr::select(., ensbl = ensembl_gene_id, gene = hgnc_symbol)
-
-GOI_PE_DOWN <- data.frame(ensbl=c("ENSG00000233913", "ENSG00000134548",
-                                  "ENSG00000203859", "ENSG00000213088",
-                                  "ENSG00000114473", "ENSG00000260719",
-                                  "ENSG00000091137", "ENSG00000157064"),
-                  gene=c("RPL10P9", "SPX", "HSD3B2", "ACKR1",
-                         "IQCG", "AC009133.17", "SLC26A4", "NMNAT2"),
-                  direction = "down")
-
-GOI_UP_DOWN <- rbind(GOI_PE_UP, GOI_PE_DOWN)
-
-samples <- dge_list_obj$samples
-
-counts <- edgeR::cpm(dge_list_obj, log = TRUE)
-
-pd <- position_dodge(width = 0.5)
-
-lcpm <- edgeR::cpm(dge_list_obj, log = TRUE)
-
-## Print all of the plots at once
-for (i in 1:nrow(GOI_PE_UP)) {
-melt_lcpm <- melt(subset(lcpm, rownames(lcpm) %in% GOI_PE_UP$ensbl[i])) %>% 
-  as.data.frame() %>% 
-  set_colnames(c("ensbl", "samplename", "log2cpm")) %>% 
-  # tibble::rownames_to_column("samplename") %>% 
-  left_join(., dge_list_obj$samples[, c("samplename", "Outcome", "Sex")], by = "samplename") 
-  
-beeswarm <- ggplot(melt_lcpm, aes(x = Sex,
-                                y = log2cpm,
-                                fill = Outcome)) +
-  stat_boxplot(geom="errorbar",
-               position = pd,
-               width = 0.2) +
-  geom_boxplot(width = 0.5,
-               position = pd) +
-  #     geom_boxplot(aes(x = Fetal.Sex,
-  #                  y =  log2cpm,
-  #                  fill = simpleOutcome)) +
-  stat_summary(fun = mean,
-               geom = "point",
-               size=2,
-               shape = 5,
-               position = position_dodge(0.5)) +
-  geom_beeswarm(dodge.width = 0.6, cex = 2) +
-  theme_bw(base_size = 18) +
-  ylab(paste("log2 CPM Counts", GOI_PE_UP$ensbl[i], GOI_PE_UP$gene[i], sep = " - ")) +
-  theme(axis.text.x = element_text(colour = "black")) +
-  theme(legend.position = "bottom")
-print(beeswarm)
-}
-
-# graphics.off()
 ```
 
 ## Volcano plot for visualisation of differential expression
@@ -377,12 +246,12 @@ print(beeswarm)
 
 ```{r volcano plots male}
 
-decide <- decideTests(contrast_fit_sex_PE)
-d2 <- topTable(contrast_fit_sex_PE, coef = 2, n = Inf, sort = "p") #[,c(2,6)]
+decide <- decideTests(contrast_fit_sex_PE_RQI)
+d2 <- topTable(contrast_fit_sex_PE_RQI, coef = 2, n = Inf, sort = "p") #[,c(2,6)]
 d2$threshold <- 0
-d2$threshold[0:nrow(filter(allTable_male_PE, adj.P.Val < 0.05))] <- 1
+d2$threshold[0:nrow(filter(allTable_male_PE_RQI, adj.P.Val < 0.05))] <- 1
 d2$threshold <- as.factor(d2$threshold)
-d3 <- decideTests(contrast_fit_sex_PE) %>%
+d3 <- decideTests(contrast_fit_sex_PE_RQI) %>%
   as.data.frame()
 d3 <- d3[2]
 d4 <- left_join(tibble::rownames_to_column(d2), (tibble::rownames_to_column(d3)),
@@ -391,7 +260,7 @@ d4$male_PE <- as.factor(d4$male_PE)
 d4$neg.log10FDR <- -log10(d4$adj.P.Val)
 # set colours for the volcano plot
 colour <- c("red", "black", "darkgreen")
-FDR_FC_Decide <- decideTests(contrast_fit_sex_PE, lfc = 0)[,"male_PE"] %>%
+FDR_FC_Decide <- decideTests(contrast_fit_sex_PE_RQI, lfc = 0)[,"male_PE"] %>%
   as.data.frame() %>%
   set_colnames("FDR_FC_Decide") %>%
   tibble::rownames_to_column() %>%
@@ -436,7 +305,7 @@ volcano_male <- ggplot(data = FDR_FC_Decide,
   theme(legend.position="bottom")
 
 ggsave(plot = volcano_male,
-       filename = file.path(projectDir, "noCovariate_output/volcano_male.pdf"),
+       filename = file.path(outdir, "volcano_male_RQI.pdf"),
        units = "in",
        width = 12,
        height = 12,
@@ -449,12 +318,12 @@ ggsave(plot = volcano_male,
 
 ```{r volcano plots female}
 
-decide <- decideTests(contrast_fit_sex_PE)
-d2 <- topTable(contrast_fit_sex_PE, coef = 1, n = Inf, sort = "p") #[,c(2,6)]
+decide <- decideTests(contrast_fit_sex_PE_RQI)
+d2 <- topTable(contrast_fit_sex_PE_RQI, coef = 1, n = Inf, sort = "p") #[,c(2,6)]
 d2$threshold <- 0
-d2$threshold[0:nrow(filter(allTable_female_PE, adj.P.Val < 0.05))] <- 1
+d2$threshold[0:nrow(filter(allTable_female_PE_RQI, adj.P.Val < 0.05))] <- 1
 d2$threshold <- as.factor(d2$threshold)
-d3 <- decideTests(contrast_fit_sex_PE) %>%
+d3 <- decideTests(contrast_fit_sex_PE_RQI) %>%
   as.data.frame()
 d3 <- d3[1]
 d4 <- left_join(tibble::rownames_to_column(d2), (tibble::rownames_to_column(d3)),
@@ -463,7 +332,7 @@ d4$female_PE <- as.factor(d4$female_PE)
 d4$neg.log10FDR <- -log10(d4$adj.P.Val)
 # set colours for the volcano plot
 colour <- c("red", "black", "darkgreen")
-FDR_FC_Decide <- decideTests(contrast_fit_sex_PE, lfc = 0)[,"female_PE"] %>%
+FDR_FC_Decide <- decideTests(contrast_fit_sex_PE_RQI, lfc = 0)[,"female_PE"] %>%
   as.data.frame() %>%
   set_colnames("FDR_FC_Decide") %>%
   tibble::rownames_to_column() %>%
@@ -508,12 +377,79 @@ volcano_female <- ggplot(data = FDR_FC_Decide,
   theme(legend.position="bottom")
 
 ggsave(plot = volcano_female,
-       filename = file.path(projectDir, "noCovariate_output/volcano_female.pdf"),
+       filename = file.path(outdir, "volcano_female_RQI.pdf"),
        units = "in",
        width = 12,
        height = 12,
        dpi = 300)
 
+
+```
+
+# Compare DE without covariate and with RQI as covariate
+
+```{r}
+
+male_logFC <- dplyr::left_join(allTable_male_PE_RQI[, c("ensembl_gene_id", "logFC")] %>%
+                                 dplyr::select(ensembl_gene_id, male_RQI_logFC = logFC),
+                               allTable_male[, c("ensembl_gene_id", "logFC")] %>%
+                                 dplyr::select(ensembl_gene_id, male_no_covariate_logFC = logFC),
+                               by = "ensembl_gene_id") %>%
+  ggplot(aes(x = male_RQI_logFC, y = male_no_covariate_logFC)) +
+  geom_hline(yintercept=0, linetype="dashed", color = "red") +
+  geom_vline(xintercept=0, linetype="dashed", color = "red") +
+  geom_point() +
+  xlim(-3.5, 6.6) +
+  ylim(-3.5, 6.6) +
+  geom_point() +
+  theme_bw() +
+  theme(text = element_text(size=18)) +
+  theme(axis.text.x = element_text(colour = "black",
+                                   face = "bold"),
+        axis.text.y = element_text(colour = "black",
+                                   face = "bold")) +
+  theme(axis.title.x = element_text(colour = "black",
+                                   face = "bold"),
+        axis.title.y = element_text(colour = "black",
+                                   face = "bold")) +
+  ggtitle("Male DE")
+ggsave(plot = male_logFC,
+       filename = file.path(outdir, "male_logFC.pdf"),
+       units = "in",
+       width = 12,
+       height = 12,
+       dpi = 300)
+
+
+female_logFC <- dplyr::left_join(allTable_female_PE_RQI[, c("ensembl_gene_id", "logFC")] %>%
+                                 dplyr::select(ensembl_gene_id, female_RQI_logFC = logFC),
+                               allTable_female[, c("ensembl_gene_id", "logFC")] %>%
+                                 dplyr::select(ensembl_gene_id, female_no_covariate_logFC = logFC),
+                               by = "ensembl_gene_id") %>%
+  ggplot(aes(x = female_RQI_logFC, y = female_no_covariate_logFC)) +
+  geom_hline(yintercept=0, linetype="dashed", color = "red") +
+  geom_vline(xintercept=0, linetype="dashed", color = "red") +
+  geom_point() +
+  xlim(-3.5, 6.6) +
+  ylim(-3.5, 6.6) +
+  geom_point() +
+  theme_bw() +
+  theme(text = element_text(size=18)) +
+  theme(axis.text.x = element_text(colour = "black",
+                                   face = "bold"),
+        axis.text.y = element_text(colour = "black",
+                                   face = "bold")) +
+  theme(axis.title.x = element_text(colour = "black",
+                                   face = "bold"),
+        axis.title.y = element_text(colour = "black",
+                                   face = "bold")) +
+  ggtitle("Female DE")
+ggsave(plot = female_logFC,
+       filename = file.path(outdir, "female_logFC.pdf"),
+       units = "in",
+       width = 12,
+       height = 12,
+       dpi = 300)
 
 ```
 
@@ -526,7 +462,7 @@ callback = function(hc, mat){
     as.hclust(dend)
 }
 
-annotation_cols <- metadata[, c("samplename", "Sex", "Outcome")] %>%
+annotation_cols <- metadata_quality[, c("samplename", "Sex", "Outcome")] %>%
   tibble::column_to_rownames("samplename")
 
 scaled_exp <- scale(t(subset(log2CPM, rownames(log2CPM) %in% dplyr::filter(FDR_FC_Decide, threshold == 1)$ensembl_gene_id)))
