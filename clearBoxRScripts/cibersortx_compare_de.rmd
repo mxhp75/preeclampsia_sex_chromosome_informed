@@ -72,6 +72,20 @@ metadata_quality <- read_csv(file = metadata_quality_file)
 allTable_female <- read_csv(file = allTable_female_file)
 allTable_male <- read_csv(file = allTable_male_file)
 topTable_male <- read_csv(file = topTable_male_file)
+# there are a couple of NAs in the gene symbols. I've looked up manually and will now replace the NA with the correct string
+# Define replacements
+replacements <- c(
+  "ENSG00000279602" = "TEC",
+  "ENSG00000260035" = "ENSG00000260035",
+  "ENSG00000231205" = "ZNF826P",
+  "ENSG00000265185" = "SNORD3B_1",
+  "ENSG00000232316" = "LINC02518",
+  "ENSG00000247809" = "NR2F2_AS1"
+)
+# Replace NA values with corresponding strings
+topTable_male$hgnc_symbol <- ifelse(is.na(topTable_male$hgnc_symbol), 
+                                    replacements[topTable_male$ensembl_gene_id], 
+                                    topTable_male$hgnc_symbol)
 
 ## Gene ID versus GeneSymbol
 gene_info <- read_csv(file = gene_info_file)
@@ -625,25 +639,187 @@ ggsave(plot = volcano_female,
 # lets take a look at the DE topTable and see how many of the DE genes are part of the signature matrix
 sig_de_overlap <- subset(cibersortx_sigMatrix, GeneSymbol %in% topTable_male$hgnc_symbol)
 
-# lets take a look at IGFBP7 and CD44
+# lets take a look at IGFBP7 and VCAN
 # in both genes SCP4157 is highly expressed and seems to be driving the DE
 # also, in both genes STP0148 is more lowly expressed than the other PE boys.
 
-melt_lcpm <- reshape2::melt(subset(lcpm, rownames(lcpm) %in% "ENSG00000026508")) %>% 
+melt_lcpm <- reshape2::melt(subset(lcpm, rownames(lcpm) %in% "ENSG00000038427")) %>% 
   as.data.frame() %>% 
   set_colnames(c("ensbl", "samplename", "log2cpm")) %>% 
   dplyr::left_join(., dge_list_obj$samples[, c("samplename", "Outcome", "Sex")], by = "samplename") %>%
-  dplyr::left_join(., cibersortx_proportion[, c("samplename", "Maternal.CD8..Activated.T.Cells")], by = "samplename")
+  dplyr::left_join(., cibersortx_proportion[, c("samplename", "Fetal.Mesenchymal.Stem.Cells")], by = "samplename") %>%
+  dplyr::mutate(sex_outcome = paste(Sex, Outcome, sep = "_"))
 
 ggplot2::ggplot(data = melt_lcpm,
-                aes(x = Maternal.CD8..Activated.T.Cells,
-                    y = log2cpm)) +
+                aes(x = Fetal.Mesenchymal.Stem.Cells,
+                    y = log2cpm,
+                    colour = sex_outcome)) +
   geom_point()
+
+
+signature_GOI_expression <- dplyr::filter(sig_de_overlap, GeneSymbol == "VCAN") %>%
+  tibble::column_to_rownames("GeneSymbol") %>%
+  t() %>%
+  data.frame() %>%
+  tibble::rownames_to_column("cell_type")
+
+```
+
+# Correlate gene expression with cell-type proportions
+## Only genes which are both DE and in the cibersortx signature matrix
+
+```{r}
+
+# lcpm
+lcpm <- edgeR::cpm(dge_list_obj, log = TRUE) %>%
+  # drop the three sample not incuded 
+# overlap between signature and DE genes - this is used to cut down the number of genes tested for correlation
+sig_de_overlap <- subset(cibersortx_sigMatrix, GeneSymbol %in% topTable_male$hgnc_symbol)
+
+# Initialize an empty data frame to store correlation results
+final_correlation_results <- data.frame(Cell_Type = names(sig_de_overlap)[-1], stringsAsFactors = FALSE)
+
+# loop through the genes and correlate with cell-type proportions
+for (i in 1:nrow(sig_de_overlap)) {
+  
+  sig_de_overlap_ensbl <- dplyr::left_join(sig_de_overlap, topTable_male[, c("ensembl_gene_id", "hgnc_symbol")], by = c("GeneSymbol" = "hgnc_symbol")) %>%
+    dplyr::select(., GeneSymbol, ensembl_gene_id, everything())
+  
+  GOI_ensbl <- paste0(sig_de_overlap_ensbl$ensembl_gene_id[i])
+  GOI_hgnc <- paste0(sig_de_overlap_ensbl$GeneSymbol[i])
+  
+  cibersortx_proportion_rownames <- cibersortx_proportion %>%
+    tibble::column_to_rownames("samplename")
+  
+  # subset the GOI lcpm expression information for all samples
+  lcpm_GOI <- reshape2::melt(subset(lcpm, rownames(lcpm) %in% sig_de_overlap_ensbl$ensembl_gene_id[i])) %>% 
+    as.data.frame() %>% 
+    set_colnames(c("ensbl", "samplename", paste0(sig_de_overlap_ensbl$ensembl_gene_id[i]))) %>% 
+    dplyr::select(., -ensbl) %>%
+    dplyr::left_join(., cibersortx_proportion, by = "samplename") %>%
+    dplyr::select(., -samplename)
+  
+  # Calculate correlations between gene expression and cell type proportions for each cell type
+  correlations <- lapply(colnames(lcpm_GOI)[-1], function(cell_type) {
+    cor(lcpm_GOI[[1]], lcpm_GOI[[cell_type]])
+  })
+  
+  # Combine correlations into a data frame
+  correlation_results <- data.frame(names(lcpm_GOI)[-1])
+  
+  # Add correlation results for the current gene as new columns
+  colnames(correlation_results) <- paste(GOI_hgnc)
+  correlation_results[] <- unlist(correlations)
+  
+  # Append the current gene's correlation results to the final data frame
+  final_correlation_results <- cbind(final_correlation_results, correlation_results)
+  
+}
+
+
+```
+
+## All genes which are DE in the male comparison
+
+```{r}
+
+# lcpm
+lcpm <- edgeR::cpm(dge_list_obj, log = TRUE)
+# overlap between signature and DE genes - this is used to cut down the number of genes tested for correlation
+sig_de_overlap <- subset(cibersortx_sigMatrix, GeneSymbol %in% topTable_male$hgnc_symbol)
+
+# Initialize an empty data frame to store correlation results
+final_correlation_results_all <- data.frame(Cell_Type = names(cibersortx_sigMatrix)[-1], stringsAsFactors = FALSE)
+
+# loop through the genes and correlate with cell-type proportions
+for (i in 1:nrow(topTable_male)) {
+  
+  de_genes_symbol_ensbl <- topTable_male %>%
+    dplyr::select(., GeneSymbol = hgnc_symbol, ensembl_gene_id)
+  
+  GOI_ensbl <- paste0(de_genes_symbol_ensbl$ensembl_gene_id[i])
+  GOI_hgnc <- paste0(de_genes_symbol_ensbl$GeneSymbol[i])
+  
+  cibersortx_proportion_rownames <- cibersortx_proportion %>%
+    tibble::column_to_rownames("samplename")
+  
+  # subset the GOI lcpm expression information for all samples
+  lcpm_GOI <- reshape2::melt(subset(lcpm, rownames(lcpm) %in% de_genes_symbol_ensbl$ensembl_gene_id[i])) %>% 
+    as.data.frame() %>% 
+    set_colnames(c("ensbl", "samplename", paste0(de_genes_symbol_ensbl$ensembl_gene_id[i]))) %>% 
+    dplyr::select(., -ensbl) %>%
+    dplyr::left_join(., cibersortx_proportion, by = "samplename") %>%
+    dplyr::select(., -samplename)
+  
+  # Calculate correlations between gene expression and cell type proportions for each cell type
+  correlations_all <- lapply(colnames(lcpm_GOI)[-1], function(cell_type) {
+    cor(lcpm_GOI[[1]], lcpm_GOI[[cell_type]])
+  })
+  
+  # Combine correlations into a data frame
+  correlation_results_all <- data.frame(names(lcpm_GOI)[-1])
+  
+  # Add correlation results for the current gene as new columns
+  colnames(correlation_results_all) <- paste(GOI_hgnc)
+  correlation_results_all[] <- unlist(correlations_all)
+  
+  # Append the current gene's correlation results to the final data frame
+  final_correlation_results_all <- cbind(final_correlation_results_all, correlation_results_all)
+  
+}
 
 
 ```
 
 # Heatmaps
+## Heatmap of cell-type and DE gene expression
+
+```{r}
+# add column annotation so I can see if the gene is up or down regulated in the DE
+column_annotation_overlap <- subset(topTable_male, hgnc_symbol %in% sig_de_overlap$GeneSymbol) %>%
+  dplyr::mutate(DE = factor(ifelse(logFC < 0, "down",
+                            "up"))) %>%
+  tibble::column_to_rownames("hgnc_symbol") %>%
+  dplyr::select(., DE)
+
+# only DE genes that are in the gene signature
+png(file=file.path(outdir, "heatmap_signature_DE_cellType_exp_cor.png"),
+    width=12,
+    height=8,
+    units = "in",
+    res = 150)
+pheatmap(final_correlation_results %>% tibble::column_to_rownames("Cell_Type"),
+         treeheight_row = 0,
+         treeheight_col = 0,
+         cutree_rows = 3,
+         cutree_cols = 2,
+         annotation_col = column_annotation_overlap)
+graphics.off()
+
+# add column annotation so I can see if the gene is up or down regulated in the DE
+column_annotation <- topTable_male %>%
+  dplyr::mutate(DE = factor(ifelse(logFC < 0, "down",
+                            "up"))) %>%
+  tibble::column_to_rownames("hgnc_symbol") %>%
+  dplyr::select(., DE)
+
+# all DE genes
+png(file=file.path(outdir, "heatmap_all_DE_cellType_exp_cor.png"),
+    width=22,
+    height=8,
+    units = "in",
+    res = 150)
+pheatmap(final_correlation_results_all %>% tibble::column_to_rownames("Cell_Type"),
+         treeheight_row = 0,
+         treeheight_col = 0,
+         cutree_rows = 3,
+         cutree_cols = 2,
+         annotation_col = column_annotation)
+graphics.off()
+
+
+```
+
 
 ```{r}
 # Modify ordering of the clusters using clustering callback option
