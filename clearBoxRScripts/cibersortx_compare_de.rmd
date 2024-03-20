@@ -228,13 +228,13 @@ pheatmap::pheatmap(cibersortx_proportion %>% tibble::column_to_rownames("samplen
 # plot the heatmap with SCP4060, SCP4010, SCP3492 removed
 reduced_cibersortx_proportion <- subset(cibersortx_proportion, samplename %notin% c("SCP4060", "SCP4010", "SCP3492"))
 rownames(reduced_cibersortx_proportion) <- NULL
-# png(filename=file.path(outdir, '58_sample_cibersortx_heatmap_row_col_anno.png'), width=800, height=800)
+png(filename=file.path(outdir, '58_sample_cibersortx_heatmap_row_col_anno.png'), width=800, height=800)
 pheatmap::pheatmap(reduced_cibersortx_proportion %>%
                      tibble::column_to_rownames("samplename"),
                    annotation_row = row_anno,
                    annotation_col = column_anno,
                    scale = "row")
-# graphics.off()
+graphics.off()
 
 ```
 
@@ -475,151 +475,6 @@ graphics.off()
 
 ```
 
-## Volcano plot for visualisation of differential expression
-### male
-
-```{r volcano plots male}
-
-decide <- decideTests(contrast_fit_sex_PE)
-d2 <- topTable(contrast_fit_sex_PE, coef = 2, n = Inf, sort = "p") #[,c(2,6)]
-d2$threshold <- 0
-d2$threshold[0:nrow(filter(allTable_male_PE, adj.P.Val < 0.05))] <- 1
-d2$threshold <- as.factor(d2$threshold)
-d3 <- decideTests(contrast_fit_sex_PE) %>%
-  as.data.frame()
-d3 <- d3[2]
-d4 <- left_join(tibble::rownames_to_column(d2), (tibble::rownames_to_column(d3)),
-                       by = "rowname")
-d4$male_PE <- as.factor(d4$male_PE)
-d4$neg.log10FDR <- -log10(d4$adj.P.Val)
-# set colours for the volcano plot
-colour <- c("red", "black", "darkgreen")
-FDR_FC_Decide <- decideTests(contrast_fit_sex_PE, lfc = 0)[,"male_PE"] %>%
-  as.data.frame() %>%
-  set_colnames("FDR_FC_Decide") %>%
-  tibble::rownames_to_column() %>%
-  left_join(., d4, by = "rowname")
-FDR_FC_Decide$FDR_FC_Decide <- as.factor(FDR_FC_Decide$FDR_FC_Decide)
-
-volcano_male <- ggplot(data = FDR_FC_Decide,
-                  aes(x = logFC,
-                      y = neg.log10FDR,
-                      label = rowname,
-                      colour = FDR_FC_Decide)) +
-  geom_point(alpha=0.9, size=2.00) +
-  xlab(expression(Log[2]*" Fold Change")) + ylab(expression("-ve "*Log[10]*" FDR")) +
-  scale_color_manual(values = colour, name="mRNA\nRegulation",
-                         breaks = c("-1", "0", "1"),
-                         labels = c("Down-regulated", "Not Significant", "Up-regulated")) +
-  theme(plot.title = element_text(hjust = 0.5)) +
-  geom_hline(yintercept = -log10(.05), linetype = "dotted") +
-  geom_vline(xintercept = c(-1, 1), linetype = "dotted") +
-  theme_bw() +
-  theme(text = element_text(size=18)) +
-  theme(axis.text.x = element_text(colour = "black",
-                                   face = "bold"),
-        axis.text.y = element_text(colour = "black",
-                                   face = "bold")) +
-  theme(axis.title.x = element_text(colour = "black",
-                                   face = "bold"),
-        axis.title.y = element_text(colour = "black",
-                                   face = "bold")) +
-  geom_label_repel(data = dplyr::filter(FDR_FC_Decide, FDR_FC_Decide==1),
-                  aes(label = hgnc_symbol),
-                  fill = "white",
-                  xlim = c(7, 0),
-                  max.overlaps = Inf,
-                  show.legend = FALSE) +
-  geom_label_repel(data = dplyr::filter(FDR_FC_Decide, FDR_FC_Decide==-1),
-                  aes(label = hgnc_symbol),
-                  fill = "white",
-                  xlim = c(-7, 0),
-                  max.overlaps = Inf,
-                  show.legend = FALSE) +
-  theme(legend.position="bottom")
-
-ggsave(plot = volcano_male,
-       filename = file.path(projectDir, "noCovariate_output/volcano_male.pdf"),
-       units = "in",
-       width = 12,
-       height = 12,
-       dpi = 300)
-
-
-```
-
-### female
-
-```{r volcano plots female}
-
-decide <- decideTests(contrast_fit_sex_PE)
-d2 <- topTable(contrast_fit_sex_PE, coef = 1, n = Inf, sort = "p") #[,c(2,6)]
-d2$threshold <- 0
-d2$threshold[0:nrow(filter(allTable_female_PE, adj.P.Val < 0.05))] <- 1
-d2$threshold <- as.factor(d2$threshold)
-d3 <- decideTests(contrast_fit_sex_PE) %>%
-  as.data.frame()
-d3 <- d3[1]
-d4 <- left_join(tibble::rownames_to_column(d2), (tibble::rownames_to_column(d3)),
-                       by = "rowname")
-d4$female_PE <- as.factor(d4$female_PE)
-d4$neg.log10FDR <- -log10(d4$adj.P.Val)
-# set colours for the volcano plot
-colour <- c("red", "black", "darkgreen")
-FDR_FC_Decide <- decideTests(contrast_fit_sex_PE, lfc = 0)[,"female_PE"] %>%
-  as.data.frame() %>%
-  set_colnames("FDR_FC_Decide") %>%
-  tibble::rownames_to_column() %>%
-  left_join(., d4, by = "rowname")
-FDR_FC_Decide$FDR_FC_Decide <- as.factor(FDR_FC_Decide$FDR_FC_Decide)
-
-volcano_female <- ggplot(data = FDR_FC_Decide,
-                  aes(x = logFC,
-                      y = neg.log10FDR,
-                      label = rowname,
-                      colour = FDR_FC_Decide)) +
-  geom_point(alpha=0.9, size=2.00) +
-  xlab(expression(Log[2]*" Fold Change")) + ylab(expression("-ve "*Log[10]*" FDR")) +
-  scale_color_manual(values = colour, name="mRNA\nRegulation",
-                         breaks = c("-1", "0", "1"),
-                         labels = c("Down-regulated", "Not Significant", "Up-regulated")) +
-  theme(plot.title = element_text(hjust = 0.5)) +
-  geom_hline(yintercept = -log10(.05), linetype = "dotted") +
-  geom_vline(xintercept = c(-1, 1), linetype = "dotted") +
-  theme_bw() +
-  theme(text = element_text(size=18)) +
-  theme(axis.text.x = element_text(colour = "black",
-                                   face = "bold"),
-        axis.text.y = element_text(colour = "black",
-                                   face = "bold")) +
-  theme(axis.title.x = element_text(colour = "black",
-                                   face = "bold"),
-        axis.title.y = element_text(colour = "black",
-                                   face = "bold")) +
-  geom_label_repel(data = dplyr::filter(FDR_FC_Decide, FDR_FC_Decide==1),
-                  aes(label = hgnc_symbol),
-                  fill = "white",
-                  xlim = c(7, 0),
-                  max.overlaps = Inf,
-                  show.legend = FALSE) +
-  geom_label_repel(data = dplyr::filter(FDR_FC_Decide, FDR_FC_Decide==-1),
-                  aes(label = hgnc_symbol),
-                  fill = "white",
-                  xlim = c(-7, 0),
-                  max.overlaps = Inf,
-                  show.legend = FALSE) +
-  theme(legend.position="bottom")
-
-ggsave(plot = volcano_female,
-       filename = file.path(projectDir, "noCovariate_output/volcano_female.pdf"),
-       units = "in",
-       width = 12,
-       height = 12,
-       dpi = 300)
-
-
-```
-
 ## DE genes overlap with signature matrix
 
 ```{r}
@@ -771,18 +626,18 @@ column_annotation_overlap <- subset(topTable_male, hgnc_symbol %in% sig_de_overl
   dplyr::select(., DE)
 
 # only DE genes that are in the gene signature
-png(file=file.path(outdir, "heatmap_signature_DE_cellType_exp_cor.png"),
-    width=12,
-    height=8,
-    units = "in",
-    res = 150)
+# png(file=file.path(outdir, "heatmap_signature_DE_cellType_exp_cor.png"),
+#     width=12,
+#     height=8,
+#     units = "in",
+#     res = 150)
 pheatmap(final_correlation_results %>% tibble::column_to_rownames("Cell_Type"),
          treeheight_row = 0,
          treeheight_col = 0,
          cutree_rows = 3,
          cutree_cols = 2,
          annotation_col = column_annotation_overlap)
-graphics.off()
+# graphics.off()
 
 # add column annotation so I can see if the gene is up or down regulated in the DE
 column_annotation <- topTable_male %>%
@@ -792,48 +647,19 @@ column_annotation <- topTable_male %>%
   dplyr::select(., DE)
 
 # all DE genes
-png(file=file.path(outdir, "heatmap_all_DE_cellType_exp_cor.png"),
-    width=22,
-    height=8,
-    units = "in",
-    res = 150)
+# png(file=file.path(outdir, "heatmap_all_DE_cellType_exp_cor.png"),
+#     width=22,
+#     height=8,
+#     units = "in",
+#     res = 150)
 pheatmap(final_correlation_results_all %>% tibble::column_to_rownames("Cell_Type"),
          treeheight_row = 0,
          treeheight_col = 0,
          cutree_rows = 3,
          cutree_cols = 2,
          annotation_col = column_annotation)
-graphics.off()
+# graphics.off()
 
-
-```
-
-
-```{r}
-# Modify ordering of the clusters using clustering callback option
-callback = function(hc, mat){
-    sv = svd(t(mat))$v[,1]
-    dend = reorder(as.dendrogram(hc), wts = sv)
-    as.hclust(dend)
-}
-
-annotation_cols <- metadata[, c("samplename", "Sex", "Outcome")] %>%
-  tibble::column_to_rownames("samplename")
-
-scaled_exp <- scale(t(subset(log2CPM, rownames(log2CPM) %in% dplyr::filter(FDR_FC_Decide, threshold == 1)$ensembl_gene_id)))
-
-# png(file=file.path(outdir, "heatmap_scaled_sig_AdjPVal_M.png"),
-#     width=12,
-#     height=8,
-#     units = "in",
-#     res = 150)
-pheatmap(t(scaled_exp),
-         annotation_col = annotation_cols,
-         show_rownames = FALSE,
-         show_colnames = TRUE,
-         cutree_cols = 3,
-         clustering_callback = callback)
-# dev.off()
 
 ```
 
