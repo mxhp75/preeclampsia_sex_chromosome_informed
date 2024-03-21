@@ -228,13 +228,21 @@ pheatmap::pheatmap(cibersortx_proportion %>% tibble::column_to_rownames("samplen
 # plot the heatmap with SCP4060, SCP4010, SCP3492 removed
 reduced_cibersortx_proportion <- subset(cibersortx_proportion, samplename %notin% c("SCP4060", "SCP4010", "SCP3492"))
 rownames(reduced_cibersortx_proportion) <- NULL
-png(filename=file.path(outdir, '58_sample_cibersortx_heatmap_row_col_anno.png'), width=800, height=800)
+# png(filename=file.path(outdir, '58_sample_cibersortx_heatmap_row_col_anno.png'), width=800, height=800)
 pheatmap::pheatmap(reduced_cibersortx_proportion %>%
                      tibble::column_to_rownames("samplename"),
                    annotation_row = row_anno,
                    annotation_col = column_anno,
                    scale = "row")
-graphics.off()
+# graphics.off()
+# save an unscaled version of the heatmap
+# png(filename=file.path(outdir, '58_sample_cibersortx_heatmap_row_col_anno_unscaled.png'), width=800, height=800)
+pheatmap::pheatmap(reduced_cibersortx_proportion %>%
+                     tibble::column_to_rownames("samplename"),
+                   annotation_row = row_anno,
+                   annotation_col = column_anno,
+                   color = colorRampPalette(c("white", "red"))(27))
+# graphics.off()
 
 ```
 
@@ -560,6 +568,61 @@ for (i in 1:nrow(sig_de_overlap)) {
 
 ```
 
+## Only genes which are in the cibersortx signature matrix but are not DE
+
+```{r}
+
+# lcpm
+lcpm <- edgeR::cpm(dge_list_obj, log = TRUE)
+# remove DE genes from the signature matrix
+# start by only keeping genes in our dataset
+de_sig_no_overlap <- subset(cibersortx_sigMatrix, GeneSymbol %in% allTable_male$hgnc_symbol) %>%
+# next, remove any genes which were DE in the male comparison
+  subset(., GeneSymbol %notin% topTable_male$hgnc_symbol)
+
+# Initialize an empty data frame to store correlation results
+final_correlation_results_not_de <- data.frame(Cell_Type = names(de_sig_no_overlap)[-1], stringsAsFactors = FALSE)
+
+# loop through the genes and correlate with cell-type proportions
+for (i in 1:nrow(de_sig_no_overlap)) {
+  
+  sig_de_no_overlap_ensbl <- dplyr::left_join(de_sig_no_overlap, allTable_male[, c("ensembl_gene_id", "hgnc_symbol")], by = c("GeneSymbol" = "hgnc_symbol")) %>%
+    dplyr::select(., GeneSymbol, ensembl_gene_id, everything())
+  
+  GOI_ensbl <- paste0(sig_de_no_overlap_ensbl$ensembl_gene_id[i])
+  GOI_hgnc <- paste0(sig_de_no_overlap_ensbl$GeneSymbol[i])
+  
+  cibersortx_proportion_rownames <- reduced_cibersortx_proportion %>%
+    tibble::column_to_rownames("samplename")
+  
+  # subset the GOI lcpm expression information for all samples
+  lcpm_GOI <- reshape2::melt(subset(lcpm, rownames(lcpm) %in% sig_de_no_overlap_ensbl$ensembl_gene_id[i])) %>% 
+    as.data.frame() %>% 
+    set_colnames(c("ensbl", "samplename", paste0(sig_de_no_overlap_ensbl$ensembl_gene_id[i]))) %>% 
+    dplyr::select(., -ensbl) %>%
+    dplyr::left_join(., reduced_cibersortx_proportion, by = "samplename") %>%
+    dplyr::select(., -samplename)
+  
+  # Calculate correlations between gene expression and cell type proportions for each cell type
+  correlations <- lapply(colnames(lcpm_GOI)[-1], function(cell_type) {
+    cor(lcpm_GOI[[1]], lcpm_GOI[[cell_type]])
+  })
+  
+  # Combine correlations into a data frame
+  correlation_results <- data.frame(names(lcpm_GOI)[-1])
+  
+  # Add correlation results for the current gene as new columns
+  colnames(correlation_results) <- paste(GOI_hgnc)
+  correlation_results[] <- unlist(correlations)
+  
+  # Append the current gene's correlation results to the final data frame
+  final_correlation_results_not_de <- cbind(final_correlation_results_not_de, correlation_results)
+  
+}
+
+
+```
+
 ## All genes which are DE in the male comparison
 
 ```{r}
@@ -660,6 +723,19 @@ pheatmap(final_correlation_results_all %>% tibble::column_to_rownames("Cell_Type
          annotation_col = column_annotation)
 # graphics.off()
 
+# all DE genes
+# png(file=file.path(outdir, "heatmap_all_sig_no_DE_cellType_exp_cor.png"),
+#     width=22,
+#     height=8,
+#     units = "in",
+#     res = 150)
+pheatmap(final_correlation_results_not_de %>% tibble::column_to_rownames("Cell_Type"),
+         show_colnames = FALSE,
+         treeheight_row = 0,
+         treeheight_col = 0,
+         cutree_rows = 3,
+         cutree_cols = 2)
+# graphics.off()
 
 ```
 
