@@ -5,6 +5,7 @@ date: "1 September 2023"
 output: html_document
 ---
 
+# Load libraries & set project directories
 ```{r}
 library(Seurat)
 library(Matrix)
@@ -79,7 +80,7 @@ dim(refMatrix)
 # Import gene information
 ```{r}
 ## Gene ID versus GeneSymbol
-gencodev32 <- read_csv(file = gencodev32_inFile)
+# gencodev32 <- read_csv(file = gencodev32_inFile)
 # df with matched gene symbols and Ensembl IDs
 # geneNames <- data.frame(rownames(campbell_placenta10x)) %>% 
 #   set_colnames("gene") %>% 
@@ -90,19 +91,19 @@ gencodev32 <- read_csv(file = gencodev32_inFile)
 ```{r}
 # we don't know what has already been "done" to the data so lets see if it has been logged and normalised
 # start with a subset of 400 cells
-ncells <- 400
+# ncells <- 400
 # set up colours for the density plots
-col_cells <- colorRampPalette(brewer.pal(11,"Spectral"))(100)
+# col_cells <- colorRampPalette(brewer.pal(11,"Spectral"))(100)
 # png(filename=file.path(outdir, "un_normalised.png"),
 #     width=12,
 #     height=7,
 #     units = "in",
 #     res = 150)
-boxplot(refMatrix[, 1:ncells], las = 2,
-        col = col_cells,
-        main = "")
-title(main = "Full Campbell ref matrix(1:400 cells): Un-normalised data ",
-      ylab = "counts") 
+# boxplot(refMatrix[, 1:ncells], las = 2,
+#         col = col_cells,
+#         main = "")
+# title(main = "Full Campbell ref matrix(1:400 cells): Un-normalised data ",
+#       ylab = "counts") 
 # dev.off()
 
 # okay - data is not logged and normalised - next step is to create the seurat object and perform some basic QC and normalisation
@@ -112,6 +113,7 @@ title(main = "Full Campbell ref matrix(1:400 cells): Un-normalised data ",
 ```{r}
 # create a new seurat object using the count table and self-generated metadata
 campbell <- CreateSeuratObject(refMatrix, meta.data = metadata)
+gc()
 ```
 
 # Pre-process
@@ -120,15 +122,15 @@ campbell <- CreateSeuratObject(refMatrix, meta.data = metadata)
 campbell[["percent.mt"]] <- PercentageFeatureSet(campbell, pattern = "^MT-")
 
 # visualise QC metric as a violin plot
-VlnPlot(campbell, features = c("nFeature_RNA", "nCount_RNA", "percent.mt"), ncol = 3)
-
-plot1 <- FeatureScatter(campbell, feature1 = "nCount_RNA", feature2 = "percent.mt")
-plot2 <- FeatureScatter(campbell, feature1 = "nCount_RNA", feature2 = "nFeature_RNA")
+# VlnPlot(campbell, features = c("nFeature_RNA", "nCount_RNA", "percent.mt"), ncol = 3)
+# 
+# plot1 <- FeatureScatter(campbell, feature1 = "nCount_RNA", feature2 = "percent.mt")
+# plot2 <- FeatureScatter(campbell, feature1 = "nCount_RNA", feature2 = "nFeature_RNA")
 
 # print the QC plots
-plot1 + plot2
+# plot1 + plot2
 
-# Subset out the poor quality cells
+# Subset out the poor quality cells (reduces object from 16003x40494 to 16003x26289)
 campbell <- subset(campbell, subset = nFeature_RNA > 500 &
                         nFeature_RNA < 2500 & percent.mt < 5)
 # Normalise the data
@@ -139,37 +141,47 @@ campbell <- NormalizeData(object = campbell,
 
 # Identify highly variable features
 campbell <- FindVariableFeatures(object = campbell,
-                                      nfeatures = 6000,
+                                      nfeatures = 2000,
                                       verbose = FALSE,
                                       selection.method = 'vst')
 # plot the highly variable features
-top10 <- head(VariableFeatures(campbell), 10)
-plot3 <- VariableFeaturePlot(campbell)
+# top10 <- head(VariableFeatures(campbell), 10)
+# plot3 <- VariableFeaturePlot(campbell)
 
-plot4 <- LabelPoints(plot = plot3, points = top10, repel = TRUE)
-plot3 + plot4
+# plot4 <- LabelPoints(plot = plot3, points = top10, repel = TRUE)
+# plot3 + plot4
 
 all.genes <- rownames(campbell)
 campbell <- ScaleData(campbell,
-                           features = all.genes,
-                           verbose = FALSE)
+                      features = all.genes,
+                      verbose = FALSE)
+
+# save the seurat object
+saveRDS(campbell, file = file.path(outdir, "campbell_small_norm.rds"))
+
 ```
 
-## Plot normalised data
+## Read in Campbell small seurat object
 ```{r}
-# png(filename=file.path(outdir, "un_normalised.png"),
-#     width=12,
-#     height=7,
-#     units = "in",
-#     res = 150)
-boxplot(refMatrix[, 1:ncells], las = 2,
-        col = col_cells,
-        main = "")
-title(main = "Full Campbell ref matrix(1:400 cells): Un-normalised data ",
-      ylab = "counts") 
-# dev.off()
+campbell <- readRDS(file = file.path(outdir, "campbell_small_norm.rds"))
+
+# re-run findVariableFeatures() and ScaleData() on the smaller object as recommended https://satijalab.org/seurat/articles/interaction_vignette#tabulate-cells-by-cluster-id-replicate-or-both
+
+# Identify highly variable features
+campbell <- FindVariableFeatures(object = campbell,
+                                      nfeatures = 2000,
+                                      verbose = FALSE,
+                                      selection.method = 'vst')
+# plot the highly variable features
+
+all.genes <- rownames(campbell)
+campbell <- ScaleData(campbell,
+                      features = all.genes,
+                      verbose = FALSE)
+gc()
 ```
 
+# Dimensional reduction
 ```{r}
 
 campbell <- RunPCA(campbell,
@@ -184,19 +196,6 @@ VizDimLoadings(campbell, dims = 1:2, reduction = "pca")
 DimPlot(campbell, reduction = "pca")
 # visualise the first 4 PCs as heatmap of 500 "most extreme" genes
 DimHeatmap(campbell, dims = 1:4, cells = 500, balanced = TRUE)
-
-# Determine the dimensionality of the dataset
-campbell <- JackStraw(campbell, num.replicate = 100)
-campbell <- ScoreJackStraw(campbell, dims = 1:20)
-
-# visualise
-JackStrawPlot(campbell, dims = 1:20)
-
-# saveRDS(campbell, file = file.path(outdir, "full_seurat_campbell.rds"))
-# 
-# campbell <- readRDS(file = file.path(outdir, "full_seurat_campbell.rds"))
-  
-  
 ```
 
 # Plot umap
@@ -210,6 +209,25 @@ DimPlot(campbell, group.by = "cell.type", reduction = "umap", label = TRUE) + No
 dev.off()
 ```
 
+## Subset the most variable genes
+
+```{r}
+# subset out the 2000 most highly variable genes
+campbell_variable <- 
+```
+
+```{r}
+# the following answer to "how to get log2 expn from seurat" is from here https://github.com/satijalab/seurat/issues/2496
+#object <- NormalizeData(object, scale.factor = 1e6)
+#log_data <- GetAssayData(object)
+#log2_data <- log(expm1(log_data) + 1, 2)
+
+# save the normalised CPMs with cell type as column header
+normCounts <- campbell_variable@assays$RNA@data
+# this code gets you the scaled data from the slot
+#GetAssayData(object = campbell, slot = 'scale.data')[1:3, 1:3]
+
+```
 # Create signature Matrix
 ```{r}
 # # this function is from here https://rdrr.io/github/MarianSchoen/DMC/f/README.md
