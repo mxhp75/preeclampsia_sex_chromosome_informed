@@ -57,3 +57,6 @@ rsconnect/
 cibersortx/fractions_latest.sif
 cibersortx/data/GSE182381_reference_sample.txt
 
+cibersortx_reduced_sigMatrix/fractions_latest.sif
+cibersortx_reduced_sigMatrix/data/GSE182381_reference_sample.txt
+
