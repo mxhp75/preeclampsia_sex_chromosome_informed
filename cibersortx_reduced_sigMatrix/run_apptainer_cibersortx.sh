@@ -5,18 +5,18 @@
 #SBATCH --ntasks=1
 # set --cpus-per-task to the number of threads we request.
 #SBATCH --cpus-per-task=4
-#SBATCH --time=20:00:00
+#SBATCH --time=5:00:00
 #SBATCH --mem=128GB
 
 # Notification configuration
-#SBATCH --job-name=smit1924_docker_cibersortx
+#SBATCH --job-name=preeclampsia_sex_informed_reduced_signatureMatrix
 #SBATCH --mail-type=END
 #SBATCH --mail-type=FAIL
 #SBATCH --mail-user=melanie.smith@flinders.edu.au
 
 
 ## Melanie Smith ##
-## 20240110 ##
+## 20240325 ##
 
 ## Script for running CIBERSORTx through apptainer -> docker ##
 ## To be run on DeepThought ##
@@ -36,7 +36,7 @@ module load apptainer/1.1.9
 ## Set environment variables
 ##--------------------------------------------------------------------------------------------##
 
-WORK_DIR="/scratch/user/smit1924/20231012_singularity_cibersortx"
+WORK_DIR="/scratch/user/smit1924/preeclampsia_sex_chromosome_informed/cibersortx_reduced_sigMatrix"
 cd $WORK_DIR
 
 ##--------------------------------------------------------------------------------------------##
@@ -60,6 +60,6 @@ apptainer run \
         --perm 100 \
         --fraction 0 \
         --single_cell TRUE \
-        --refsample GSE182381_reference_sample.txt \
+        --refsample GSE182381_reduced_reference_sample.txt \
         --mixture bulkCountMatrix_all_gene_symbol.txt \
         --rmbatchSmode TRUE
