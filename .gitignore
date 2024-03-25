@@ -52,3 +52,8 @@ rsconnect/
 *.gff3
 *.gtf
 .Rproj.user
+
+# CibersortX files
+./cibersortx/fractions_latest.sif
+./cibersortx/data/GSE182381_reference_sample.txt
+
