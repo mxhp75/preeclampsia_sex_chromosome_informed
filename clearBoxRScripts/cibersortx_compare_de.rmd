@@ -109,6 +109,27 @@ cibersortx_sigMatrix <- cibersortx_sigMatrix[rowSums(cibersortx_sigMatrix[,-1])>
 
 ```
 
+## Plot the Cibersortx Signature Matrix as a heatmap
+
+```{r}
+
+# Cibersort gene signature
+# png(file=file.path(outdir, "heatmap_cibersortx_signature_matrix.png"),
+#     width=12,
+#     height=8,
+#     units = "in",
+#     res = 150)
+cibersortx_sigMatrix %>%
+  `rownames<-`(NULL) %>%
+  as.data.frame() %>%
+  tibble::column_to_rownames("GeneSymbol") %>%
+  pheatmap(scale = "row",
+           treeheight_row = 0,
+           main = "Cibersortx Adjusted Signature Matrix (scaled by row)")
+# dev.off()
+```
+
+
 # Cibersortx Cell-Type Proportions
 ## Plot cell-type proportions
 
