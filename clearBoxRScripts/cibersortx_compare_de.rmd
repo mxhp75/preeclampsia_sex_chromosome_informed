@@ -32,6 +32,7 @@ expt_name <- 'cibersortx_de'
 
 counts_geneID_file <- file.path(projectDir, "clearBoxRawData/rawCounts_melanie_v2.0.3.csv")
 dge_list_obj_file <- file.path(projectDir, "noCovariate_output/DGEList_filtered_normalised.rds")
+tpm_table_file <- file.path(projectDir, "clearBoxCleanData/tpm_bulkCountMatrix_all_gene_symbol.txt")
 metadata_quality_file <- file.path(projectDir, "clearBoxCleanData/metadata_quality.csv")
 allTable_female_file <- file.path(projectDir, "noCovariate_output/allTable_female.csv")
 allTable_male_file <- file.path(projectDir, "noCovariate_output/allTable_male.csv")
@@ -49,11 +50,11 @@ outdir_deDown <- file.path(paste0(outdir, "/deDown"))
 
 
 
-dir.create(outdir)
-dir.create(paste0(outdir, "/literatureUp"))
-dir.create(paste0(outdir, "/literatureDown"))
-dir.create(paste0(outdir, "/deUp"))
-dir.create(paste0(outdir, "/deDown"))
+# dir.create(outdir)
+# dir.create(paste0(outdir, "/literatureUp"))
+# dir.create(paste0(outdir, "/literatureDown"))
+# dir.create(paste0(outdir, "/deUp"))
+# dir.create(paste0(outdir, "/deDown"))
 
 # set max digits
 options(digits=3)
@@ -71,6 +72,10 @@ dge_list_obj <- readRDS(dge_list_obj_file)
 # create an lcpm object for later use
 lcpm <- edgeR::cpm(dge_list_obj, log = TRUE)
 metadata_quality <- read_csv(file = metadata_quality_file)
+
+## tpm table - all genes, all samples
+tpm_bulkCountMatrix_all_genes <- read.table(file = tpm_table_file, header = TRUE, sep = "\t")
+dim(tpm_bulkCountMatrix_all_genes) # 13784    62
 
 # DE tables (no covariate)
 allTable_female <- read_csv(file = allTable_female_file)
@@ -109,6 +114,7 @@ cibersortx_sigMatrix <- cibersortx_sigMatrix[rowSums(cibersortx_sigMatrix[,-1])>
 
 ```
 
+# Sanity plots
 ## Plot the Cibersortx Signature Matrix as a heatmap
 
 ```{r}
@@ -129,145 +135,6 @@ cibersortx_sigMatrix %>%
 # dev.off()
 ```
 
-
-# Cibersortx Cell-Type Proportions
-## Plot cell-type proportions
-
-```{r}
-# which cell types are the most abundent
-ordered_celltypes <- data.frame(proportion = 
-  colSums(cibersortx_proportion[, -1])[order(colSums(cibersortx_proportion[, -1]),
-                                             decreasing = TRUE)]) %>%
-  # use the tibble package to rownames into the column names cell_type
-  tibble::rownames_to_column("cell_type") 
-  
-# convert proportions table to long table format
-data_long <- tidyr::pivot_longer(cibersortx_proportion,
-                                 cols = colnames(cibersortx_proportion[, !colnames(cibersortx_proportion) %in% "samplename"]),
-                                 names_to = "cell_type",
-                                 values_to = "proportion")
-
-# Generate 27 distinct colors from the viridis palette
-my_palette <- colorspace::rainbow_hcl(27)
-
-# Plot the stacked bar chart (not ordered)
-ggplot(data_long, aes(x = samplename, y = proportion, fill = cell_type)) +
-  geom_bar(stat = "identity") +
-  labs(title = "CIBERSORTx Deconvolution", x = "Samplename", y = "Cell-Type Proportion") +
-  theme_minimal() +
-  theme(legend.position = "right") +
-  viridis::scale_fill_viridis(discrete = TRUE, option = "C") +
-  theme(axis.text.x = element_text(angle = 90, hjust = 1))
-
-# Reorder samplenames based on the proportion of Fetal Cytotrophoblasts
-ordered_samples_fetal_CTB <- dplyr::filter(data_long, cell_type == "Fetal.Cytotrophoblasts") %>%
-  arrange(desc(proportion)) %>%
-  dplyr::pull(samplename)
-
-# Replot proprtions based on the proportion of Fetal B Cells
-# png(filename=file.path(outdir, 'cibersortx_decon_CTB.png'), width=1200, height=800)
-ggplot(data_long, aes(x = factor(samplename, levels = ordered_samples_fetal_CTB), y = proportion, fill = cell_type)) +
-  geom_bar(stat = "identity") +
-  labs(title = "CIBERSORTx Deconvolution (ordered by prop. CTB)",
-       x = "Samplename",
-       y = "Cell-Type Proportion") +
-  theme_minimal() +
-  theme(legend.position = "right") +
-  viridis::scale_fill_viridis(discrete = TRUE, option = "C") +
-  theme(axis.text.x = element_text(angle = 90, hjust = 1))
-# graphics.off()
-
-# Reorder samplenames based on the proportion of Maternal FCGR3A+ Monocytes
-ordered_samples_maternal_mono <- dplyr::filter(data_long, cell_type == "Maternal.FCGR3A..Monocytes") %>%
-  arrange(desc(proportion)) %>%
-  dplyr::pull(samplename)
-
-# Replot proprtions based on the proportion of Maternal FCGR3A+ Monocytes
-# png(filename=file.path(outdir, 'cibersortx_decon_mat_mono.png'), width=1200, height=800)
-ggplot(data_long, aes(x = factor(samplename, levels = ordered_samples_maternal_mono),
-                      y = proportion,
-                      fill = cell_type)) +
-  geom_bar(stat = "identity") +
-  labs(title = "CIBERSORTx Deconvolution (ordered by prop. Maternal FCGR3A+ Monocytes)", x = "Samplename", y = "Cell-Type Proportion") +
-  theme_minimal() +
-  theme(legend.position = "right") +
-  viridis::scale_fill_viridis(discrete = TRUE, option = "C") +
-  theme(axis.text.x = element_text(angle = 90, hjust = 1))
-# graphics.off()
-
-# Reorder samplenames based on the proportion of Maternal.Naive.CD8..T.Cells
-ordered_samples_maternal_CD8_tcells <- dplyr::filter(data_long, cell_type == "Maternal.Naive.CD8..T.Cells") %>%
-  arrange(desc(proportion)) %>%
-  dplyr::pull(samplename)
-
-# Replot proprtions based on the proportion of Maternal FCGR3A+ Monocytes
-# png(filename=file.path(outdir, 'cibersortx_decon_mat_CD8_tcells.png'), width=1200, height=800)
-ggplot(data_long, aes(x = factor(samplename, levels = ordered_samples_maternal_CD8_tcells),
-                      y = proportion,
-                      fill = cell_type)) +
-  geom_bar(stat = "identity") +
-  labs(title = "CIBERSORTx Deconvolution (ordered by prop. Maternal CD8+ T Cells)",
-       x = "Samplename",
-       y = "Cell-Type Proportion") +
-  theme_minimal() +
-  theme(legend.position = "right") +
-  viridis::scale_fill_viridis(discrete = TRUE, option = "C") +
-  theme(axis.text.x = element_text(angle = 90, hjust = 1))
-# graphics.off()
-
-# Heatmap of cell-type proportions
-# add column annotation for maternal v fetal cells
-# add row annotation for male v female samples
-# add row annotation for PE v Uncomplicated
-
-row_anno <- metadata_quality %>%
-  dplyr::select(., samplename, Sex, Outcome, sex_outcome) %>%
-  tibble::column_to_rownames("samplename")
-
-column_anno <- data.frame(cell_type = colnames(cibersortx_sigMatrix[,-1]),
-                          compartment = as.factor(colnames(cibersortx_sigMatrix[,-1]))) %>%
-  tibble::column_to_rownames("cell_type")
-
-# Split column names at the first period and extract the first element
-compartment <- str_split_fixed(colnames(cibersortx_sigMatrix[, -1]), "\\.", n = 2)[, 1]
-
-# Create the data frame
-column_anno <- data.frame(
-  cell_type = colnames(cibersortx_sigMatrix[, -1]),
-  compartment = as.factor(compartment)
-) %>%
-  tibble::column_to_rownames("cell_type")
-
-# plot the heatmap of all samples
-# png(filename=file.path(outdir, 'cibersortx_heatmap_row_col_anno.png'), width=800, height=800)
-pheatmap::pheatmap(cibersortx_proportion %>% tibble::column_to_rownames("samplename"),
-                   annotation_row = row_anno,
-                   annotation_col = column_anno,
-                   scale = "row")
-# graphics.off()
-
-# plot the heatmap with SCP4060, SCP4010, SCP3492 removed
-reduced_cibersortx_proportion <- subset(cibersortx_proportion, samplename %notin% c("SCP4060", "SCP4010", "SCP3492"))
-rownames(reduced_cibersortx_proportion) <- NULL
-# png(filename=file.path(outdir, '58_sample_cibersortx_heatmap_row_col_anno.png'), width=800, height=800)
-pheatmap::pheatmap(reduced_cibersortx_proportion %>%
-                     tibble::column_to_rownames("samplename"),
-                   annotation_row = row_anno,
-                   annotation_col = column_anno,
-                   scale = "row")
-# graphics.off()
-# save an unscaled version of the heatmap
-# png(filename=file.path(outdir, '58_sample_cibersortx_heatmap_row_col_anno_unscaled.png'), width=800, height=800)
-pheatmap::pheatmap(reduced_cibersortx_proportion %>%
-                     tibble::column_to_rownames("samplename"),
-                   annotation_row = row_anno,
-                   annotation_col = column_anno,
-                   color = colorRampPalette(c("white", "red"))(27))
-# graphics.off()
-
-```
-
-# Sanity plot of genes
 ## PE associated genes from the literature
 
 ```{r}
@@ -504,7 +371,9 @@ graphics.off()
 
 ```
 
-## DE genes overlap with signature matrix
+## DE genes overlap with signature matrix  
+- Here I would like to take a look at the gene expression relative to cell-type proportions for my DE genes. My thought is that I will be able to see a pattern (ie as cell-type proportion increases so does gene expression) for genes who's DE is driven by changes in cell type proportion.  
+- I am also interested in seeing how the gene expression for DE genes compares between my groups of interest. To look at this I will create box plots with scatter plot overlay for my genes of interest. These will be coloured by sex_outcome. I am interested to see if my DE is being driven by outliers.  
 
 ```{r}
 # lets take a look at the DE topTable and see how many of the DE genes are part of the signature matrix
@@ -514,25 +383,169 @@ sig_de_overlap <- subset(cibersortx_sigMatrix, GeneSymbol %in% topTable_male$hgn
 # in both genes SCP4157 is highly expressed and seems to be driving the DE
 # also, in both genes STP0148 is more lowly expressed than the other PE boys.
 
-melt_lcpm <- reshape2::melt(subset(lcpm, rownames(lcpm) %in% "ENSG00000038427")) %>% 
-  as.data.frame() %>% 
-  set_colnames(c("ensbl", "samplename", "log2cpm")) %>% 
-  dplyr::left_join(., dge_list_obj$samples[, c("samplename", "Outcome", "Sex")], by = "samplename") %>%
-  dplyr::left_join(., cibersortx_proportion[, c("samplename", "Fetal.Mesenchymal.Stem.Cells")], by = "samplename") %>%
-  dplyr::mutate(sex_outcome = paste(Sex, Outcome, sep = "_"))
-
-ggplot2::ggplot(data = melt_lcpm,
-                aes(x = Fetal.Mesenchymal.Stem.Cells,
-                    y = log2cpm,
-                    colour = sex_outcome)) +
-  geom_point()
-
+# generate the table of counts per million from the DGEList object
+cpm <- edgeR::cpm(dge_list_obj, log = FALSE)
+# choose a gene of interest to be plotted
+GOI <- "ENSG00000163283"
+# choose a cell of interest
+COI <- "Fetal.Cytotrophoblasts"
 # what is the gene signature for the gene of interest according to the cibersort signature matrix
-signature_GOI_expression <- dplyr::filter(sig_de_overlap, GeneSymbol == "VCAN") %>%
+signature_GOI_expression <- dplyr::filter(sig_de_overlap, GeneSymbol == "ALPP") %>%
   tibble::column_to_rownames("GeneSymbol") %>%
   t() %>%
   data.frame() %>%
   tibble::rownames_to_column("cell_type")
+# generate the table of cpms for the gene of interest
+melt_cpm <- reshape2::melt(subset(cpm, rownames(lcpm) %in% GOI)) %>% 
+  as.data.frame() %>% 
+  set_colnames(c("ensbl", "samplename", "cpm")) %>% 
+  dplyr::left_join(., dge_list_obj$samples[, c("samplename", "Outcome", "Sex")], by = "samplename") %>%
+  dplyr::left_join(., cibersortx_proportion[, c("samplename", COI)], by = "samplename") %>%
+  dplyr::mutate(sex_outcome = paste(Sex, Outcome, sep = "_"))
+# generate the plot
+ggplot2::ggplot(data = melt_cpm,
+                aes_string(x = COI,
+                    y = "cpm",
+                    colour = "sex_outcome")) +
+  geom_point() +
+  ggtitle(paste("Gene of Interest", dplyr::filter(allTable_male, ensembl_gene_id == GOI)[[2]], sep = " "))
+
+```
+
+# Cibersortx Cell-Type Proportions
+## Plot cell-type proportions
+
+```{r}
+# which cell types are the most abundent
+ordered_celltypes <- data.frame(proportion = 
+  colSums(cibersortx_proportion[, -1])[order(colSums(cibersortx_proportion[, -1]),
+                                             decreasing = TRUE)]) %>%
+  # use the tibble package to rownames into the column names cell_type
+  tibble::rownames_to_column("cell_type") 
+  
+# convert proportions table to long table format
+data_long <- tidyr::pivot_longer(cibersortx_proportion,
+                                 cols = colnames(cibersortx_proportion[, !colnames(cibersortx_proportion) %in% "samplename"]),
+                                 names_to = "cell_type",
+                                 values_to = "proportion")
+
+# Generate 27 distinct colors from the viridis palette
+my_palette <- colorspace::rainbow_hcl(27)
+
+# Plot the stacked bar chart (not ordered)
+ggplot(data_long, aes(x = samplename, y = proportion, fill = cell_type)) +
+  geom_bar(stat = "identity") +
+  labs(title = "CIBERSORTx Deconvolution", x = "Samplename", y = "Cell-Type Proportion") +
+  theme_minimal() +
+  theme(legend.position = "right") +
+  viridis::scale_fill_viridis(discrete = TRUE, option = "C") +
+  theme(axis.text.x = element_text(angle = 90, hjust = 1))
+
+# Reorder samplenames based on the proportion of Fetal Cytotrophoblasts
+ordered_samples_fetal_CTB <- dplyr::filter(data_long, cell_type == "Fetal.Cytotrophoblasts") %>%
+  arrange(desc(proportion)) %>%
+  dplyr::pull(samplename)
+
+# Replot proprtions based on the proportion of Fetal B Cells
+# png(filename=file.path(outdir, 'cibersortx_decon_CTB.png'), width=1200, height=800)
+ggplot(data_long, aes(x = factor(samplename, levels = ordered_samples_fetal_CTB), y = proportion, fill = cell_type)) +
+  geom_bar(stat = "identity") +
+  labs(title = "CIBERSORTx Deconvolution (ordered by prop. CTB)",
+       x = "Samplename",
+       y = "Cell-Type Proportion") +
+  theme_minimal() +
+  theme(legend.position = "right") +
+  viridis::scale_fill_viridis(discrete = TRUE, option = "C") +
+  theme(axis.text.x = element_text(angle = 90, hjust = 1))
+# graphics.off()
+
+# Reorder samplenames based on the proportion of Maternal FCGR3A+ Monocytes
+ordered_samples_maternal_mono <- dplyr::filter(data_long, cell_type == "Maternal.FCGR3A..Monocytes") %>%
+  arrange(desc(proportion)) %>%
+  dplyr::pull(samplename)
+
+# Replot proprtions based on the proportion of Maternal FCGR3A+ Monocytes
+# png(filename=file.path(outdir, 'cibersortx_decon_mat_mono.png'), width=1200, height=800)
+ggplot(data_long, aes(x = factor(samplename, levels = ordered_samples_maternal_mono),
+                      y = proportion,
+                      fill = cell_type)) +
+  geom_bar(stat = "identity") +
+  labs(title = "CIBERSORTx Deconvolution (ordered by prop. Maternal FCGR3A+ Monocytes)", x = "Samplename", y = "Cell-Type Proportion") +
+  theme_minimal() +
+  theme(legend.position = "right") +
+  viridis::scale_fill_viridis(discrete = TRUE, option = "C") +
+  theme(axis.text.x = element_text(angle = 90, hjust = 1))
+# graphics.off()
+
+# Reorder samplenames based on the proportion of Maternal.Naive.CD8..T.Cells
+ordered_samples_maternal_CD8_tcells <- dplyr::filter(data_long, cell_type == "Maternal.Naive.CD8..T.Cells") %>%
+  arrange(desc(proportion)) %>%
+  dplyr::pull(samplename)
+
+# Replot proprtions based on the proportion of Maternal FCGR3A+ Monocytes
+# png(filename=file.path(outdir, 'cibersortx_decon_mat_CD8_tcells.png'), width=1200, height=800)
+ggplot(data_long, aes(x = factor(samplename, levels = ordered_samples_maternal_CD8_tcells),
+                      y = proportion,
+                      fill = cell_type)) +
+  geom_bar(stat = "identity") +
+  labs(title = "CIBERSORTx Deconvolution (ordered by prop. Maternal CD8+ T Cells)",
+       x = "Samplename",
+       y = "Cell-Type Proportion") +
+  theme_minimal() +
+  theme(legend.position = "right") +
+  viridis::scale_fill_viridis(discrete = TRUE, option = "C") +
+  theme(axis.text.x = element_text(angle = 90, hjust = 1))
+# graphics.off()
+
+# Heatmap of cell-type proportions
+# add column annotation for maternal v fetal cells
+# add row annotation for male v female samples
+# add row annotation for PE v Uncomplicated
+
+row_anno <- metadata_quality %>%
+  dplyr::select(., samplename, Sex, Outcome, sex_outcome) %>%
+  tibble::column_to_rownames("samplename")
+
+column_anno <- data.frame(cell_type = colnames(cibersortx_sigMatrix[,-1]),
+                          compartment = as.factor(colnames(cibersortx_sigMatrix[,-1]))) %>%
+  tibble::column_to_rownames("cell_type")
+
+# Split column names at the first period and extract the first element
+compartment <- str_split_fixed(colnames(cibersortx_sigMatrix[, -1]), "\\.", n = 2)[, 1]
+
+# Create the data frame
+column_anno <- data.frame(
+  cell_type = colnames(cibersortx_sigMatrix[, -1]),
+  compartment = as.factor(compartment)
+) %>%
+  tibble::column_to_rownames("cell_type")
+
+# plot the heatmap of all samples
+# png(filename=file.path(outdir, 'cibersortx_heatmap_row_col_anno.png'), width=800, height=800)
+pheatmap::pheatmap(cibersortx_proportion %>% tibble::column_to_rownames("samplename"),
+                   annotation_row = row_anno,
+                   annotation_col = column_anno,
+                   scale = "row")
+# graphics.off()
+
+# plot the heatmap with SCP4060, SCP4010, SCP3492 removed
+reduced_cibersortx_proportion <- subset(cibersortx_proportion, samplename %notin% c("SCP4060", "SCP4010", "SCP3492"))
+rownames(reduced_cibersortx_proportion) <- NULL
+# png(filename=file.path(outdir, '58_sample_cibersortx_heatmap_row_col_anno.png'), width=800, height=800)
+pheatmap::pheatmap(reduced_cibersortx_proportion %>%
+                     tibble::column_to_rownames("samplename"),
+                   annotation_row = row_anno,
+                   annotation_col = column_anno,
+                   scale = "row")
+# graphics.off()
+# save an unscaled version of the heatmap
+# png(filename=file.path(outdir, '58_sample_cibersortx_heatmap_row_col_anno_unscaled.png'), width=800, height=800)
+pheatmap::pheatmap(reduced_cibersortx_proportion %>%
+                     tibble::column_to_rownames("samplename"),
+                   annotation_row = row_anno,
+                   annotation_col = column_anno,
+                   color = colorRampPalette(c("white", "red"))(27))
+# graphics.off()
 
 ```
 
