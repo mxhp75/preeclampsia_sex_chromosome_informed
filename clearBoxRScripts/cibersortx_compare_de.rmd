@@ -41,6 +41,8 @@ gene_info_file <- file.path(projectDir, "clearBoxRawData/gene_id_vs_symbol.csv")
 
 cibersortx_proportion_file <- file.path(projectDir, "cibersortx/outdir/CIBERSORTx_Adjusted.txt")
 cibersortx_sigMatrix_file <- file.path(projectDir, "cibersortx/outdir/CIBERSORTx_sigmatrix_Adjusted.txt")
+cibersortx_reduced_proportion_file <- file.path(projectDir, "cibersortx_reduced_sigMatrix/outdir/CIBERSORTx_Adjusted.txt")
+cibersortx_reduced_sigMatrix_file <- file.path(projectDir, "cibersortx_reduced_sigMatrix/outdir/CIBERSORTx_sigmatrix_Adjusted.txt")
 
 outdir <- file.path(projectDir, paste0(expt_name, "_output"))
 outdir_literatureUp <- file.path(paste0(outdir, "/literatureUp"))
@@ -104,7 +106,7 @@ gene_info <- read_csv(file = gene_info_file)
 gene_info <- read_csv(file = gene_info_file)
 gene_info <- gene_info[!duplicated(gene_info$ensembl_gene_id), ]
 
-# CIBERSORTx signature matrix and proportion files
+# CIBERSORTx signature matrix and proportion files - all Campbell cell types
 cibersortx_proportion <- read.table(file = cibersortx_proportion_file, header = TRUE, sep = "\t") %>%
   dplyr::select(., samplename = Mixture, everything()) %>%
   dplyr::select(., -'P.value', -'Correlation', -'RMSE')
@@ -112,10 +114,21 @@ cibersortx_sigMatrix <- read.table(file = cibersortx_sigMatrix_file, header = TR
 # remove rows that contain all zero counts in the signature matrix
 cibersortx_sigMatrix <- cibersortx_sigMatrix[rowSums(cibersortx_sigMatrix[,-1])>0,]
 
+# CIBERSORTx signature matrix and proportion files - reduced cell types
+cibersortx_reduced_proportion <- read.table(file = cibersortx_reduced_proportion_file, header = TRUE, sep = "\t") %>%
+  dplyr::select(., samplename = Mixture, everything()) %>%
+  dplyr::select(., -'P.value', -'Correlation', -'RMSE')
+
+cibersortx_reduced_sigMatrix <- read.table(file = cibersortx_reduced_sigMatrix_file, header = TRUE, sep = "\t")
+# remove rows that contain all zero counts in the signature matrix
+cibersortx_reduced_sigMatrix <- cibersortx_reduced_sigMatrix[rowSums(cibersortx_reduced_sigMatrix[,-1])>0,]
+dim(cibersortx_reduced_sigMatrix)
+
 ```
 
 # Sanity plots
 ## Plot the Cibersortx Signature Matrix as a heatmap
+### Original matrix with all cell types from Campbell _et al._
 
 ```{r}
 
@@ -132,6 +145,26 @@ cibersortx_sigMatrix %>%
   pheatmap(scale = "row",
            treeheight_row = 0,
            main = "Cibersortx Adjusted Signature Matrix (scaled by row)")
+# dev.off()
+```
+
+### Original matrix with the reduced signature matrix
+
+```{r}
+
+# Cibersort gene signature
+# png(file=file.path(outdir, "heatmap_cibersortx_reduced signature_matrix.png"),
+#     width=12,
+#     height=8,
+#     units = "in",
+#     res = 150)
+cibersortx_reduced_sigMatrix %>%
+  `rownames<-`(NULL) %>%
+  as.data.frame() %>%
+  tibble::column_to_rownames("GeneSymbol") %>%
+  pheatmap(scale = "row",
+           treeheight_row = 0,
+           main = "Cibersortx Reduced Adjusted Signature Matrix (scaled by row)")
 # dev.off()
 ```
 
