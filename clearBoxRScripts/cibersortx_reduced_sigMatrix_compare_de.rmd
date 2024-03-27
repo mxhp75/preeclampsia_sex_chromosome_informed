@@ -1,0 +1,128 @@
+---
+title: "cibersortx_reduced_sigMatrix"
+author: "Melanie Smith"
+date: "27 March 2024"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+# Load required libraries
+
+```{r load Libraries}
+library(plyr)
+library(reshape2)
+library(dplyr)
+library(tidyr)
+library(stringr)
+library(edgeR)
+library(readxl)
+library(readr)
+library(magrittr)
+library(tibble)
+library(ggplot2)
+library(ggbeeswarm)
+library(ggrepel)
+library(pheatmap)
+
+# set project directory
+projectDir <- "/home/smit1924/preeclampsia_sex_chromosome_informed"
+# projectDir <- "/Users/pillmaka/Desktop/Melanie/drive-download"
+
+# set experiment name
+expt_name <- 'cibersortx_reduced_sigMatrix'
+
+# create objects for files to be imported
+counts_geneID_file <- file.path(projectDir, "clearBoxRawData/rawCounts_melanie_v2.0.3.csv")
+dge_list_obj_file <- file.path(projectDir, "noCovariate_output/DGEList_filtered_normalised.rds")
+tpm_table_file <- file.path(projectDir, "clearBoxCleanData/tpm_bulkCountMatrix_all_gene_symbol.txt")
+metadata_quality_file <- file.path(projectDir, "clearBoxCleanData/metadata_quality.csv")
+allTable_female_file <- file.path(projectDir, "noCovariate_output/allTable_female.csv")
+allTable_male_file <- file.path(projectDir, "noCovariate_output/allTable_male.csv")
+topTable_male_file <- file.path(projectDir, "noCovariate_output/topTable_male_pe.csv")
+gene_info_file <- file.path(projectDir, "clearBoxRawData/gene_id_vs_symbol.csv")
+
+cibersortx_proportion_file <- file.path(projectDir, "cibersortx/outdir/CIBERSORTx_Adjusted.txt")
+cibersortx_sigMatrix_file <- file.path(projectDir, "cibersortx/outdir/CIBERSORTx_sigmatrix_Adjusted.txt")
+cibersortx_reduced_proportion_file <- file.path(projectDir, "cibersortx_reduced_sigMatrix/outdir/CIBERSORTx_Adjusted.txt")
+cibersortx_reduced_sigMatrix_file <- file.path(projectDir, "cibersortx_reduced_sigMatrix/outdir/CIBERSORTx_sigmatrix_Adjusted.txt")
+
+# create objects for output files
+outdir <- file.path(projectDir, paste0(expt_name, "_output"))
+outdir_literatureUp <- file.path(paste0(outdir, "/literatureUp"))
+outdir_literatureDown <- file.path(paste0(outdir, "/literatureDown"))
+outdir_deUp <- file.path(paste0(outdir, "/deUp"))
+outdir_deDown <- file.path(paste0(outdir, "/deDown"))
+
+
+
+dir.create(outdir)
+dir.create(paste0(outdir, "/literatureUp"))
+dir.create(paste0(outdir, "/literatureDown"))
+dir.create(paste0(outdir, "/deUp"))
+dir.create(paste0(outdir, "/deDown"))
+
+# set max digits
+options(digits=3)
+
+`%notin%` <- Negate(`%in%`)
+
+```
+
+# Import all input data tables
+
+```{r}
+
+## DGEList object
+dge_list_obj <- readRDS(dge_list_obj_file)
+# create a log 2 cpm object for later use
+lcpm <- edgeR::cpm(dge_list_obj, log = TRUE)
+# create an un-logged cpm object for later use
+cpm <- edgeR::cpm(dge_list_obj, log = FALSE)
+metadata_quality <- read_csv(file = metadata_quality_file)
+
+## import the tpm table - all genes, all samples
+tpm_bulkCountMatrix_all_genes <- read.table(file = tpm_table_file, header = TRUE, sep = "\t")
+dim(tpm_bulkCountMatrix_all_genes) # 13784    62
+
+# DE tables (no covariate)
+allTable_female <- read_csv(file = allTable_female_file)
+allTable_male <- read_csv(file = allTable_male_file)
+topTable_male <- read_csv(file = topTable_male_file)
+# there are a couple of NAs in the gene symbols. I've looked up manually and will now replace the NA with the correct string
+# Define replacements
+replacements <- c(
+  "ENSG00000279602" = "TEC",
+  "ENSG00000260035" = "ENSG00000260035",
+  "ENSG00000231205" = "ZNF826P",
+  "ENSG00000265185" = "SNORD3B_1",
+  "ENSG00000232316" = "LINC02518",
+  "ENSG00000247809" = "NR2F2_AS1"
+)
+# Replace NA values with corresponding strings
+# I looked each gene up on genecards
+topTable_male$hgnc_symbol <- ifelse(is.na(topTable_male$hgnc_symbol), 
+                                    replacements[topTable_male$ensembl_gene_id], 
+                                    topTable_male$hgnc_symbol)
+
+## Gene ID versus GeneSymbol
+gene_info <- read_csv(file = gene_info_file)
+
+## Gene ID versus GeneSymbol
+gene_info <- read_csv(file = gene_info_file)
+gene_info <- gene_info[!duplicated(gene_info$ensembl_gene_id), ]
+
+# CIBERSORTx signature matrix and proportion files - reduced cell types
+cibersortx_reduced_proportion <- read.table(file = cibersortx_reduced_proportion_file, header = TRUE, sep = "\t") %>%
+  dplyr::select(., samplename = Mixture, everything()) %>%
+  dplyr::select(., -'P.value', -'Correlation', -'RMSE')
+
+cibersortx_reduced_sigMatrix <- read.table(file = cibersortx_reduced_sigMatrix_file, header = TRUE, sep = "\t")
+# remove rows that contain all zero counts in the signature matrix
+cibersortx_reduced_sigMatrix <- cibersortx_reduced_sigMatrix[rowSums(cibersortx_reduced_sigMatrix[,-1])>0,]
+dim(cibersortx_reduced_sigMatrix)
+
+```
+
