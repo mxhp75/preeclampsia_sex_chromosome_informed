@@ -48,6 +48,7 @@ cibersortx_proportion_file <- file.path(projectDir, "cibersortx/outdir/CIBERSORT
 cibersortx_sigMatrix_file <- file.path(projectDir, "cibersortx/outdir/CIBERSORTx_sigmatrix_Adjusted.txt")
 cibersortx_reduced_proportion_file <- file.path(projectDir, "cibersortx_reduced_sigMatrix/outdir/CIBERSORTx_Adjusted.txt")
 cibersortx_reduced_sigMatrix_file <- file.path(projectDir, "cibersortx_reduced_sigMatrix/outdir/CIBERSORTx_sigmatrix_Adjusted.txt")
+cibersortx_reduced_mixture_adjusted_file <- file.path(projectDir, "cibersortx_reduced_sigMatrix/outdir/CIBERSORTx_Mixtures_Adjusted.txt")
 
 # create objects for output files
 outdir <- file.path(projectDir, paste0(expt_name, "_output"))
@@ -119,10 +120,250 @@ cibersortx_reduced_proportion <- read.table(file = cibersortx_reduced_proportion
   dplyr::select(., samplename = Mixture, everything()) %>%
   dplyr::select(., -'P.value', -'Correlation', -'RMSE')
 
+# CIBERSORTx proportion file with RMSE  - reduced cell types
+cibersortx_reduced_proportion_rmse <- read.table(file = cibersortx_reduced_proportion_file, header = TRUE, sep = "\t") %>%
+  dplyr::select(., samplename = Mixture, everything())
+
 cibersortx_reduced_sigMatrix <- read.table(file = cibersortx_reduced_sigMatrix_file, header = TRUE, sep = "\t")
 # remove rows that contain all zero counts in the signature matrix
 cibersortx_reduced_sigMatrix <- cibersortx_reduced_sigMatrix[rowSums(cibersortx_reduced_sigMatrix[,-1])>0,]
 dim(cibersortx_reduced_sigMatrix)
 
+# CIBERSORTx adjusted mixture - reduced cell types
+cibersortx_reduced_mixture_adjusted <- read.table(file = cibersortx_reduced_mixture_adjusted_file, header = TRUE, sep = "\t")
+
 ```
 
+# Sanity plots
+## Plot the Cibersortx Signature Matrix as a heatmap
+### Reduced signature matrix
+
+```{r}
+
+# Cibersort gene signature
+# png(file=file.path(outdir, "heatmap_cibersortx_reduced signature_matrix.png"),
+#     width=12,
+#     height=8,
+#     units = "in",
+#     res = 150)
+cibersortx_reduced_sigMatrix %>%
+  `rownames<-`(NULL) %>%
+  as.data.frame() %>%
+  tibble::column_to_rownames("GeneSymbol") %>%
+  pheatmap(scale = "row",
+           show_rownames = FALSE,
+           treeheight_row = 0,
+           main = "Cibersortx Reduced Adjusted Signature Matrix (scaled by row)")
+# dev.off()
+```
+
+# Cibersortx Cell-Type Proportions
+## Plot cell-type proportions
+
+```{r}
+# which cell types are the most abundent
+ordered_celltypes <- data.frame(proportion = 
+  colSums(cibersortx_reduced_proportion[, -1])[order(colSums(cibersortx_reduced_proportion[, -1]),
+                                             decreasing = TRUE)]) %>%
+  # use the tibble package to rownames into the column names cell_type
+  tibble::rownames_to_column("cell_type") 
+  
+# convert proportions table to long table format
+data_long <- tidyr::pivot_longer(cibersortx_reduced_proportion,
+                                 cols = colnames(cibersortx_reduced_proportion[, !colnames(cibersortx_reduced_proportion) %in% "samplename"]),
+                                 names_to = "cell_type",
+                                 values_to = "proportion")
+
+# Generate 27 distinct colors from the viridis palette
+my_palette <- colorspace::rainbow_hcl(27)
+
+# Plot the stacked bar chart (not ordered)
+ggplot(data_long, aes(x = samplename, y = proportion, fill = cell_type)) +
+  geom_bar(stat = "identity") +
+  labs(title = "CIBERSORTx Deconvolution", x = "Samplename", y = "Cell-Type Proportion") +
+  theme_minimal() +
+  theme(legend.position = "right") +
+  viridis::scale_fill_viridis(discrete = TRUE, option = "C") +
+  theme(axis.text.x = element_text(angle = 90, hjust = 1))
+
+# Reorder samplenames based on the proportion of Fetal Cytotrophoblasts
+ordered_samples_fetal_CTB <- dplyr::filter(data_long, cell_type == "Fetal.Cytotrophoblasts") %>%
+  arrange(desc(proportion)) %>%
+  dplyr::pull(samplename)
+
+# Replot proprtions based on the proportion of Fetal B Cells
+# png(filename=file.path(outdir, 'cibersortx_decon_CTB.png'), width=1200, height=800)
+ggplot(data_long, aes(x = factor(samplename, levels = ordered_samples_fetal_CTB), y = proportion, fill = cell_type)) +
+  geom_bar(stat = "identity") +
+  labs(title = "CIBERSORTx Deconvolution (ordered by prop. CTB)",
+       x = "Samplename",
+       y = "Cell-Type Proportion") +
+  theme_minimal() +
+  theme(legend.position = "right") +
+  viridis::scale_fill_viridis(discrete = TRUE, option = "C") +
+  theme(axis.text.x = element_text(angle = 90, hjust = 1))
+# graphics.off()
+
+# Reorder samplenames based on the proportion of Maternal FCGR3A+ Monocytes
+ordered_samples_maternal_mono <- dplyr::filter(data_long, cell_type == "Maternal.FCGR3A..Monocytes") %>%
+  arrange(desc(proportion)) %>%
+  dplyr::pull(samplename)
+
+# Replot proprtions based on the proportion of Maternal FCGR3A+ Monocytes
+# png(filename=file.path(outdir, 'cibersortx_decon_mat_mono.png'), width=1200, height=800)
+ggplot(data_long, aes(x = factor(samplename, levels = ordered_samples_maternal_mono),
+                      y = proportion,
+                      fill = cell_type)) +
+  geom_bar(stat = "identity") +
+  labs(title = "CIBERSORTx Deconvolution (ordered by prop. Maternal FCGR3A+ Monocytes)", x = "Samplename", y = "Cell-Type Proportion") +
+  theme_minimal() +
+  theme(legend.position = "right") +
+  viridis::scale_fill_viridis(discrete = TRUE, option = "C") +
+  theme(axis.text.x = element_text(angle = 90, hjust = 1))
+# graphics.off()
+
+# Reorder samplenames based on the proportion of Maternal.Naive.CD8..T.Cells
+ordered_samples_CD8_tcells <- dplyr::filter(data_long, cell_type == "Naive.CD8..T.Cells") %>%
+  arrange(desc(proportion)) %>%
+  dplyr::pull(samplename)
+
+# Replot proprtions based on the proportion of Maternal FCGR3A+ Monocytes
+# png(filename=file.path(outdir, 'cibersortx_decon_mat_CD8_tcells.png'), width=1200, height=800)
+ggplot(data_long, aes(x = factor(samplename, levels = ordered_samples_CD8_tcells),
+                      y = proportion,
+                      fill = cell_type)) +
+  geom_bar(stat = "identity") +
+  labs(title = "CIBERSORTx Deconvolution (ordered by prop. CD8+ T Cells)",
+       x = "Samplename",
+       y = "Cell-Type Proportion") +
+  theme_minimal() +
+  theme(legend.position = "right") +
+  viridis::scale_fill_viridis(discrete = TRUE, option = "C") +
+  theme(axis.text.x = element_text(angle = 90, hjust = 1))
+# graphics.off()
+
+# Heatmap of cell-type proportions
+# add column annotation for maternal v fetal cells
+# add row annotation for male v female samples
+# add row annotation for PE v Uncomplicated
+
+row_anno <- metadata_quality %>%
+  dplyr::select(., samplename, Sex, Outcome, sex_outcome) %>%
+  dplyr::left_join(., cibersortx_reduced_proportion_rmse %>% dplyr::select(., samplename, Correlation, RMSE), by = "samplename") %>%
+  tibble::column_to_rownames("samplename")
+
+# plot the heatmap of all samples
+# png(filename=file.path(outdir, 'cibersortx_heatmap_row_col_anno.png'), width=800, height=800)
+pheatmap::pheatmap(cibersortx_reduced_proportion %>% tibble::column_to_rownames("samplename"),
+                   annotation_row = row_anno,
+                   # annotation_col = column_anno,
+                   scale = "row")
+# graphics.off()
+
+# plot the heatmap with SCP4060, SCP4010, SCP3492 removed
+cibersortx_reduced_proportion_reduced_samples <- subset(cibersortx_reduced_proportion, samplename %notin% c("SCP4060", "SCP4010", "SCP3492"))
+rownames(cibersortx_reduced_proportion_reduced_samples) <- NULL
+
+# save a version of the heatmap with raw proportion data as the input
+png(filename=file.path(outdir, '58_sample_cibersortx_heatmap_row_col_anno_raw.png'), width=800, height=800)
+pheatmap::pheatmap(cibersortx_reduced_proportion_reduced_samples %>%
+                     tibble::column_to_rownames("samplename"),
+                   annotation_row = row_anno,
+                   color = colorRampPalette(c("white", "red"))(27),
+                   main = "raw proportion data")
+graphics.off()
+# save a version of the heatmap with logged proportion data as the input
+# save which columns are numeric
+id_numeric <- sapply(cibersortx_reduced_proportion_reduced_samples, is.numeric)
+# make a copy of the raw data to transform
+log2_cibersortx_reduced_proportion_reduced_samples <- cibersortx_reduced_proportion_reduced_samples
+# transform the raw data
+log2_cibersortx_reduced_proportion_reduced_samples[, idx] <- log2(cibersortx_reduced_proportion_reduced_samples[, idx] + .01)
+# save the plot
+png(filename=file.path(outdir, '58_sample_cibersortx_heatmap_row_col_anno_logged.png'), width=800, height=800)
+pheatmap::pheatmap(log2_cibersortx_reduced_proportion_reduced_samples %>%
+                     tibble::column_to_rownames("samplename"),
+                   annotation_row = row_anno,
+                   color = colorRampPalette(c("white", "blue"))(27),
+                   main = "Log2 (+.01) proportion data")
+graphics.off()
+
+# save a version of the heatmap with mean centred and scaled proportions
+# create a new matrix for the scaled data
+cibersortx_reduced_proportion_reduced_samples_scaled <- cibersortx_reduced_proportion_reduced_samples %>%
+  tibble::column_to_rownames("samplename") %>%
+  t() %>%
+  scale(., center = TRUE, scale = TRUE) %>%
+  t()
+
+png(filename=file.path(outdir, '58_sample_cibersortx_heatmap_row_col_anno_scaled.png'), width=800, height=800)
+pheatmap::pheatmap(cibersortx_reduced_proportion_reduced_samples_scaled,
+                   annotation_row = row_anno,
+                   main = "mean centred and scaled proportion data")
+graphics.off()
+
+```
+
+# Predicted gene expression
+## Scatter plot of the adjusted matrix versus the sample tpms
+
+```{r}
+
+```
+
+## Create a new expression matrix based on the cell type proportion and the single cell signature matrix
+
+# Correlate gene expression with cell-type proportions
+## Include genes that are both DE and in the cibersortx signature matrix  
+- I will use the tpm matrix for the correlation as this is the table that is input into Cibersortx. Might not make any difference.  
+
+```{r}
+
+# put the hgnc symbol into the rownames for the tpm matrix
+######tpm_bulkCountMatrix_all_genes %<>% tibble::column_to_rownames("hgnc_symbol")
+
+# overlap between signature and DE genes - this is used to cut down the number of genes tested for correlation
+sig_de_overlap <- subset(cibersortx_reduced_sigMatrix, GeneSymbol %in% topTable_male$hgnc_symbol)
+
+# Initialize an empty data frame to store correlation results
+final_correlation_results <- data.frame(Cell_Type = names(sig_de_overlap)[-1], stringsAsFactors = FALSE)
+
+# loop through the genes and correlate with cell-type proportions
+for (i in 1:nrow(sig_de_overlap)) {
+  
+  sig_de_overlap_ensbl <- dplyr::left_join(sig_de_overlap, topTable_male[, c("ensembl_gene_id", "hgnc_symbol")], by = c("GeneSymbol" = "hgnc_symbol")) %>%
+    dplyr::select(., GeneSymbol, ensembl_gene_id, everything())
+  
+  GOI_ensbl <- paste0(sig_de_overlap_ensbl$ensembl_gene_id[i])
+  GOI_hgnc <- paste0(sig_de_overlap_ensbl$GeneSymbol[i])
+  
+  cibersortx_proportion_rownames <- cibersortx_reduced_proportion %>%
+    tibble::column_to_rownames("samplename")
+  
+  # subset the GOI tpm_bulkCountMatrix expression information for all samples
+  tpm_GOI <- reshape2::melt(subset(tpm_bulkCountMatrix_all_genes, rownames(tpm_bulkCountMatrix_all_genes) %in% sig_de_overlap_ensbl$ensembl_gene_id[i])) %>% 
+    as.data.frame() %>% 
+    set_colnames(c("ensbl", "samplename", paste0(sig_de_overlap_ensbl$ensembl_gene_id[i]))) %>% 
+    dplyr::select(., -ensbl) %>%
+    dplyr::left_join(., cibersortx_reduced_proportion, by = "samplename") %>%
+    dplyr::select(., -samplename)
+  
+  # Calculate correlations between gene expression and cell type proportions for each cell type
+  correlations <- lapply(colnames(tpm_GOI)[-1], function(cell_type) {
+    cor(tpm_GOI[[1]], tpm_GOI[[cell_type]])
+  })
+  
+  # Combine correlations into a data frame
+  correlation_results <- data.frame(names(tpm_GOI)[-1])
+  
+  # Add correlation results for the current gene as new columns
+  colnames(correlation_results) <- paste(GOI_hgnc)
+  correlation_results[] <- unlist(correlations)
+  
+  # Append the current gene's correlation results to the final data frame
+  final_correlation_results <- cbind(final_correlation_results, correlation_results)
+  
+}
+
+
+```
