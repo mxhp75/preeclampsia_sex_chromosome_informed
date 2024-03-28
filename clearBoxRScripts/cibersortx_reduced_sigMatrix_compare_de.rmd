@@ -308,6 +308,33 @@ graphics.off()
 ## Scatter plot of the adjusted matrix versus the sample tpms
 
 ```{r}
+# there are 26 genes in the tpm matrix with duplicated gene names as an artifact of the original join - delete one and move on with life.
+# Find the indices of the first occurrence of each unique gene name
+first_indices <- !duplicated(tpm_bulkCountMatrix_all_genes$hgnc_symbol)
+
+# Subset the matrix to keep only the rows with the first occurrence of duplicated gene names
+tpm_bulkCountMatrix_all_genes <- tpm_bulkCountMatrix_all_genes[first_indices, ]
+# remove the samples not to be considered here
+tpm_bulkCountMatrix_all_genes <- tpm_bulkCountMatrix_all_genes %>%
+  dplyr::select(., -SCP4060, -SCP4010, -SCP3492) %>%
+  # rename the gene name column to match the cibersort output
+  dplyr::select(., GeneSymbol = hgnc_symbol, everything())
+
+# What is the intersection of gene names between the two matrices
+common_strings <- intersect(cibersortx_reduced_mixture_adjusted$GeneSymbol, tpm_bulkCountMatrix_all_genes$GeneSymbol)
+num_common_strings <- length(common_strings)
+print(num_common_strings)
+
+# subset each table into the subset of common genes by gene name
+intersect_cibersort_adjusted_mixture <- subset(cibersortx_reduced_mixture_adjusted, GeneSymbol %in% common_strings) %>%
+  melt() %>%
+  dplyr::select(., GeneSymbol, samplename = variable, cibersort = value)
+intersect_tpm <- subset(tpm_bulkCountMatrix_all_genes, GeneSymbol %in% common_strings) %>%
+  melt() %>%
+  dplyr::select(., GeneSymbol, samplename = variable, tpm = value)
+
+counts_to_plot <- dplyr::full_join(intersect_cibersort_adjusted_mixture, intersect_tpm, by = c("GeneSymbol", "samplename"))
+ggplot(aes(x = tpm_bulkCountMatrix_all_genes$GeneSymbol))
 
 ```
 
