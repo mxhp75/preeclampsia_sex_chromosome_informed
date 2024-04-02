@@ -265,13 +265,13 @@ cibersortx_reduced_proportion_reduced_samples <- subset(cibersortx_reduced_propo
 rownames(cibersortx_reduced_proportion_reduced_samples) <- NULL
 
 # save a version of the heatmap with raw proportion data as the input
-png(filename=file.path(outdir, '58_sample_cibersortx_heatmap_row_col_anno_raw.png'), width=800, height=800)
+# png(filename=file.path(outdir, '58_sample_cibersortx_heatmap_row_col_anno_raw.png'), width=800, height=800)
 pheatmap::pheatmap(cibersortx_reduced_proportion_reduced_samples %>%
                      tibble::column_to_rownames("samplename"),
                    annotation_row = row_anno,
                    color = colorRampPalette(c("white", "red"))(27),
                    main = "raw proportion data")
-graphics.off()
+# graphics.off()
 # save a version of the heatmap with logged proportion data as the input
 # save which columns are numeric
 id_numeric <- sapply(cibersortx_reduced_proportion_reduced_samples, is.numeric)
@@ -280,13 +280,13 @@ log2_cibersortx_reduced_proportion_reduced_samples <- cibersortx_reduced_proport
 # transform the raw data
 log2_cibersortx_reduced_proportion_reduced_samples[, id_numeric] <- log2(cibersortx_reduced_proportion_reduced_samples[, id_numeric] + .01)
 # save the plot
-png(filename=file.path(outdir, '58_sample_cibersortx_heatmap_row_col_anno_logged.png'), width=800, height=800)
+# png(filename=file.path(outdir, '58_sample_cibersortx_heatmap_row_col_anno_logged.png'), width=800, height=800)
 pheatmap::pheatmap(log2_cibersortx_reduced_proportion_reduced_samples %>%
                      tibble::column_to_rownames("samplename"),
                    annotation_row = row_anno,
                    color = colorRampPalette(c("white", "blue"))(27),
                    main = "Log2 (+.01) proportion data")
-graphics.off()
+# graphics.off()
 
 # save a version of the heatmap with mean centred and scaled proportions
 # create a new matrix for the scaled data
@@ -296,11 +296,11 @@ cibersortx_reduced_proportion_reduced_samples_scaled <- cibersortx_reduced_propo
   scale(., center = TRUE, scale = TRUE) %>%
   t()
 
-png(filename=file.path(outdir, '58_sample_cibersortx_heatmap_row_col_anno_scaled.png'), width=800, height=800)
+# png(filename=file.path(outdir, '58_sample_cibersortx_heatmap_row_col_anno_scaled.png'), width=800, height=800)
 pheatmap::pheatmap(cibersortx_reduced_proportion_reduced_samples_scaled,
                    annotation_row = row_anno,
                    main = "mean centred and scaled proportion data")
-graphics.off()
+# graphics.off()
 
 ```
 
@@ -325,19 +325,21 @@ cibersort <- cibersortx_reduced_mixture_adjusted %>%
   dplyr::select(., -SCP4060, -SCP4010, -SCP3492)
 
 # What is the intersection of gene names between the two matrices
-common_strings <- intersect(cibersort$GeneSymbol, tpm$GeneSymbol) # no duplicated gene names
-num_common_strings <- length(common_strings)
-print(num_common_strings) # 12349
+# common_strings <- intersect(cibersort$GeneSymbol, tpm$GeneSymbol) # no duplicated gene names
+# number_common_strings <- length(common_strings)
+# print(number_common_strings) # 12349
 
-# subset each table into the subset of common genes by gene name
-intersect_cibersort_adjusted_mixture <- subset(cibersort, GeneSymbol %in% common_strings) %>%
+# rather than look for the intersection between the two expression tables I need to subset both by the genes in the signature matrix
+
+# subset each table into only genes in the signature matrix by gene name
+intersect_cibersort_adjusted_mixture <- subset(cibersort, GeneSymbol %in% cibersortx_reduced_sigMatrix$GeneSymbol) %>%
   melt() %>%
   dplyr::select(., GeneSymbol, samplename = variable, cibersort = value) # 753289 3
 
-intersect_tpm <- subset(tpm, GeneSymbol %in% common_strings) %>%
+intersect_tpm <- subset(tpm, GeneSymbol %in% cibersortx_reduced_sigMatrix$GeneSymbol) %>%
   melt() %>%
   dplyr::select(., GeneSymbol, samplename = variable, tpm = value) #716242 3
-
+# join the tables for ggplot - raw data
 counts_to_plot <- dplyr::full_join(intersect_cibersort_adjusted_mixture, intersect_tpm, by = c("GeneSymbol", "samplename"))
 ggplot(data = counts_to_plot,
        aes(x = tpm,
@@ -345,6 +347,7 @@ ggplot(data = counts_to_plot,
            color = samplename)) +
   geom_point()
 
+# lets log the counts so we can get a better view of the scatter
 # save which columns are numeric
 id_numeric <- sapply(counts_to_plot, is.numeric)
 # make a copy of the raw data to transform
@@ -358,12 +361,57 @@ ggplot(data = log2_counts_to_plot,
        aes(x = tpm,
            y = cibersort,
            color = samplename)) +
-  geom_point()
+  geom_point() 
 # graphics.off()
 
+# make and save one plot per sample
+plots <- vector("list", length(unique(log2_counts_to_plot$samplename)))
+for (i in seq_along(plots)) {
+  samplename <- unique(log2_counts_to_plot$samplename)[i]
+  subset <- log2_counts_to_plot[log2_counts_to_plot$samplename == samplename, ]
+  
+  # Create the plot object
+  plots[[i]] <- ggplot(data = subset,
+                       aes(x = tpm,
+                           y = cibersort)) +
+    geom_point() +
+    ggtitle(samplename)
+  
+  # Save the plot as a PNG file
+  png(filename = file.path(outdir, "cibersortx_mixture_matrix", paste0(samplename, "_log2_adjusted_matrix_v_tpms.png")),
+      width = 800, height = 800)
+  print(plots[[i]])
+  dev.off()
+}
 ```
 
 ## Create a new expression matrix based on the cell type proportion and the single cell signature matrix
+### Start with one cell type
+- Looks like there are only two genes in the signature matrix with values in only one cell type  
+
+```{r}
+# Identify rows with non-zero values in only one column of the signature matrix
+rows_with_one_nonzero <- rowSums(cibersortx_reduced_sigMatrix[, -1] != 0) == 1
+# Subset the original data frame based on the identified rows
+subset_sig_matrix <- cibersortx_reduced_sigMatrix[rows_with_one_nonzero, ]
+# Print the subsetted data frame
+print(subset_sig_matrix)
+
+# lets pull the two genes in question from the tpms
+tpm_AADACL3 <- subset(tpm, GeneSymbol %in% "AADACL3")
+tpm_GKN1 <- subset(tpm, GeneSymbol %in% "GKN1")
+
+# and now lets calculate the expression for each gene based on the proportion of the ETV cell type
+first_reconvolution_AADACL3 <- subset_sig_matrix %>% 
+  subset(., GeneSymbol %in% "AADACL3") %>% melt()
+  
+second_reconvolution_AADACL3 <- subset_sig_matrix %>% 
+  subset(., GeneSymbol %in% "AADACL3") %>%
+  melt(., value.name = "signature_value", variable.names("GeneSymbol"))
+
+reconvolution_GKN1
+
+```
 
 # Correlate gene expression with cell-type proportions
 ## Include genes that are both DE and in the cibersortx signature matrix  
