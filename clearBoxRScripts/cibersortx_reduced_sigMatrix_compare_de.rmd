@@ -278,7 +278,7 @@ id_numeric <- sapply(cibersortx_reduced_proportion_reduced_samples, is.numeric)
 # make a copy of the raw data to transform
 log2_cibersortx_reduced_proportion_reduced_samples <- cibersortx_reduced_proportion_reduced_samples
 # transform the raw data
-log2_cibersortx_reduced_proportion_reduced_samples[, idx] <- log2(cibersortx_reduced_proportion_reduced_samples[, idx] + .01)
+log2_cibersortx_reduced_proportion_reduced_samples[, id_numeric] <- log2(cibersortx_reduced_proportion_reduced_samples[, id_numeric] + .01)
 # save the plot
 png(filename=file.path(outdir, '58_sample_cibersortx_heatmap_row_col_anno_logged.png'), width=800, height=800)
 pheatmap::pheatmap(log2_cibersortx_reduced_proportion_reduced_samples %>%
@@ -308,33 +308,58 @@ graphics.off()
 ## Scatter plot of the adjusted matrix versus the sample tpms
 
 ```{r}
-# there are 26 genes in the tpm matrix with duplicated gene names as an artifact of the original join - delete one and move on with life.
+# there are 26 genes in the tpm matrix with duplicated gene names as an artifact of the original join - delete one and move on with life initial dim 13784 x 62
 # Find the indices of the first occurrence of each unique gene name
 first_indices <- !duplicated(tpm_bulkCountMatrix_all_genes$hgnc_symbol)
 
 # Subset the matrix to keep only the rows with the first occurrence of duplicated gene names
-tpm_bulkCountMatrix_all_genes <- tpm_bulkCountMatrix_all_genes[first_indices, ]
+tpm <- tpm_bulkCountMatrix_all_genes[first_indices, ]
+dim(tpm) # 13764 62
 # remove the samples not to be considered here
-tpm_bulkCountMatrix_all_genes <- tpm_bulkCountMatrix_all_genes %>%
+tpm <- tpm %>%
   dplyr::select(., -SCP4060, -SCP4010, -SCP3492) %>%
   # rename the gene name column to match the cibersort output
-  dplyr::select(., GeneSymbol = hgnc_symbol, everything())
+  dplyr::select(., GeneSymbol = hgnc_symbol, everything()) # 13764 59
+# remove samples not to be considered
+cibersort <- cibersortx_reduced_mixture_adjusted %>%
+  dplyr::select(., -SCP4060, -SCP4010, -SCP3492)
 
 # What is the intersection of gene names between the two matrices
-common_strings <- intersect(cibersortx_reduced_mixture_adjusted$GeneSymbol, tpm_bulkCountMatrix_all_genes$GeneSymbol)
+common_strings <- intersect(cibersort$GeneSymbol, tpm$GeneSymbol) # no duplicated gene names
 num_common_strings <- length(common_strings)
-print(num_common_strings)
+print(num_common_strings) # 12349
 
 # subset each table into the subset of common genes by gene name
-intersect_cibersort_adjusted_mixture <- subset(cibersortx_reduced_mixture_adjusted, GeneSymbol %in% common_strings) %>%
+intersect_cibersort_adjusted_mixture <- subset(cibersort, GeneSymbol %in% common_strings) %>%
   melt() %>%
-  dplyr::select(., GeneSymbol, samplename = variable, cibersort = value)
-intersect_tpm <- subset(tpm_bulkCountMatrix_all_genes, GeneSymbol %in% common_strings) %>%
+  dplyr::select(., GeneSymbol, samplename = variable, cibersort = value) # 753289 3
+
+intersect_tpm <- subset(tpm, GeneSymbol %in% common_strings) %>%
   melt() %>%
-  dplyr::select(., GeneSymbol, samplename = variable, tpm = value)
+  dplyr::select(., GeneSymbol, samplename = variable, tpm = value) #716242 3
 
 counts_to_plot <- dplyr::full_join(intersect_cibersort_adjusted_mixture, intersect_tpm, by = c("GeneSymbol", "samplename"))
-ggplot(aes(x = tpm_bulkCountMatrix_all_genes$GeneSymbol))
+ggplot(data = counts_to_plot,
+       aes(x = tpm,
+           y = cibersort,
+           color = samplename)) +
+  geom_point()
+
+# save which columns are numeric
+id_numeric <- sapply(counts_to_plot, is.numeric)
+# make a copy of the raw data to transform
+log2_counts_to_plot <- counts_to_plot
+# transform the raw data
+log2_counts_to_plot[, id_numeric] <- log2(counts_to_plot[, id_numeric] + 1)
+
+# make and save the scatterplot - all samples in one plot
+# png(filename=file.path(outdir, 'log2_adjusted_matrix_v_tpms.png'), width=800, height=800)
+ggplot(data = log2_counts_to_plot,
+       aes(x = tpm,
+           y = cibersort,
+           color = samplename)) +
+  geom_point()
+# graphics.off()
 
 ```
 
