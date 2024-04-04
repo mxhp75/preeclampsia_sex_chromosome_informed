@@ -57,7 +57,7 @@ outdir_literatureDown <- file.path(paste0(outdir, "/literatureDown"))
 outdir_deUp <- file.path(paste0(outdir, "/deUp"))
 outdir_deDown <- file.path(paste0(outdir, "/deDown"))
 
-
+# create directories for output files
 
 dir.create(outdir)
 dir.create(paste0(outdir, "/literatureUp"))
@@ -341,48 +341,137 @@ intersect_tpm <- subset(tpm, GeneSymbol %in% cibersortx_reduced_sigMatrix$GeneSy
   dplyr::select(., GeneSymbol, samplename = variable, tpm = value) #716242 3
 # join the tables for ggplot - raw data
 counts_to_plot <- dplyr::full_join(intersect_cibersort_adjusted_mixture, intersect_tpm, by = c("GeneSymbol", "samplename"))
-ggplot(data = counts_to_plot,
-       aes(x = tpm,
-           y = cibersort,
-           color = samplename)) +
-  geom_point()
+# ggplot(data = counts_to_plot,
+#        aes(x = tpm,
+#            y = cibersort,
+#            color = samplename)) +
+#   geom_point()
 
 # lets log the counts so we can get a better view of the scatter
 # save which columns are numeric
 id_numeric <- sapply(counts_to_plot, is.numeric)
 # make a copy of the raw data to transform
 log2_counts_to_plot <- counts_to_plot
+# Replace negative values with zero
+log2_counts_to_plot[, id_numeric][log2_counts_to_plot[, id_numeric] < 0] <- 0
 # transform the raw data
-log2_counts_to_plot[, id_numeric] <- log2(counts_to_plot[, id_numeric] + 1)
+log2_counts_to_plot[, id_numeric] <- log2(log2_counts_to_plot[, id_numeric] + .01)
 
 # make and save the scatterplot - all samples in one plot
 # png(filename=file.path(outdir, 'log2_adjusted_matrix_v_tpms.png'), width=800, height=800)
-ggplot(data = log2_counts_to_plot,
-       aes(x = tpm,
-           y = cibersort,
-           color = samplename)) +
-  geom_point() 
+# ggplot(data = log2_counts_to_plot,
+#        aes(x = tpm,
+#            y = cibersort,
+#            color = samplename)) +
+#   geom_point() 
 # graphics.off()
 
 # make and save one plot per sample
-plots <- vector("list", length(unique(log2_counts_to_plot$samplename)))
-for (i in seq_along(plots)) {
-  samplename <- unique(log2_counts_to_plot$samplename)[i]
-  subset <- log2_counts_to_plot[log2_counts_to_plot$samplename == samplename, ]
-  
-  # Create the plot object
-  plots[[i]] <- ggplot(data = subset,
-                       aes(x = tpm,
-                           y = cibersort)) +
-    geom_point() +
-    ggtitle(samplename)
-  
-  # Save the plot as a PNG file
-  png(filename = file.path(outdir, "cibersortx_mixture_matrix", paste0(samplename, "_log2_adjusted_matrix_v_tpms.png")),
-      width = 800, height = 800)
-  print(plots[[i]])
-  dev.off()
+# plots <- vector("list", length(unique(log2_counts_to_plot$samplename)))
+# for (i in seq_along(plots)) {
+#   samplename <- unique(log2_counts_to_plot$samplename)[i]
+#   subset <- log2_counts_to_plot[log2_counts_to_plot$samplename == samplename, ]
+#   
+#   # Create the plot object
+#   plots[[i]] <- ggplot(data = subset,
+#                        aes(x = tpm,
+#                            y = cibersort)) +
+#     geom_point() +
+#     ggtitle(samplename)
+#   
+#   # Save the plot as a PNG file
+#   png(filename = file.path(outdir, "cibersortx_mixture_matrix", paste0(samplename, "_log2_adjusted_matrix_v_tpms.png")),
+#       width = 800, height = 800)
+#   print(plots[[i]])
+#   dev.off()
+# }
+
+```
+
+## Scatterplots per cell-type per sample
+- after talking with Kat we decided we needed more resolution in the tpm v mixture matrix scatter plots.  
+- to this end I will make new scatter plots, one per cell type per sample.  
+- each plot will have the non-zero signature genes graded by expression value.  
+
+```{r, eval=FALSE}
+
+# lets create the new folders we need to hold all the plots
+# each folder will be named by cell type from the proportion table
+output_directory_names <- colnames(cibersortx_reduced_proportion[,-1])
+name <- output_directory_names[1]
+# Create directories based on column names
+for (name in output_directory_names) {
+  dir.create(path = paste0(outdir, "/cibersortx_mixture_matrix", "/", name), showWarnings = FALSE)  # Create directory with column name
 }
+
+
+# make and save one plot per cell type per sample
+plots <- vector("list", length(unique(log2_counts_to_plot$samplename)))
+    
+  for (i in seq_along(plots)) {
+    samplename <- unique(log2_counts_to_plot$samplename)[i]
+    subset <- log2_counts_to_plot[log2_counts_to_plot$samplename == samplename, ]
+      
+    for (col_name in names(cibersortx_reduced_sigMatrix)[-1]) {
+      # get the signature matrix values and combine with the tpm and cibersort values from subset
+      subset_with_sigMatrix_value <- cibersortx_reduced_sigMatrix[cibersortx_reduced_sigMatrix[, col_name] > 0, c("GeneSymbol", col_name)] %>%
+        dplyr::left_join(., subset, by = "GeneSymbol")
+        
+      # Find the maximum value in the dataset
+      max_value <- max(max(subset$tpm), max(subset$cibersort))
+      # Find the minimum value in the dataset
+      min_value <- min(min(subset$tpm), min(subset$cibersort))
+        
+      # Get the RMSE value corresponding to the current samplename
+      rmse_value <- cibersortx_reduced_proportion_rmse[cibersortx_reduced_proportion_rmse$samplename == samplename, "RMSE"]
+        
+      # Create the plot object
+      plots[[i]] <- ggplot(data = subset,
+                           aes(x = tpm,
+                               y = cibersort)) +
+        geom_point(alpha = 0.5) +
+        # Add line of best fit
+        geom_smooth(method = "lm", se = FALSE) +
+        # set x and y axis limits
+        xlim(min_value, max_value) +
+        ylim(min_value, max_value) +
+        # Add x=y line
+        geom_abline(intercept = 0,
+                    slope = 1,
+                    color = "red",
+                    linetype = "dashed") +
+        # add the RMSE value in the top left corner
+        geom_text(x = min(subset$tpm),
+                  y = max(subset$cibersort),
+                  label = paste("RMSE:", round(rmse_value, 2)),
+                  hjust = -1,
+                  color = "black") +
+        # add a second layer of points coloured by sigMatrix value
+        geom_point(data = subset_with_sigMatrix_value,
+                   aes_string(x = "tpm",
+                              y = "cibersort",
+                              colour = paste("log2(", col_name, ")", sep = ""))) +
+        scale_color_gradient(name = paste("Cibersort SigMatrix (log2 ", col_name, ")", sep = ""),
+                             low = "lightblue",
+                             high = "darkblue") +
+        # update main and axis labels
+        labs(x = "log2 tpm + 0.01",
+             y = "Cibersortx Mixture Matrix",
+             title = samplename) +
+        theme_bw() +
+        theme(legend.position = "bottom")
+      
+      # Save the plot as a PNG file
+      png(filename = file.path(outdir, "cibersortx_mixture_matrix", col_name, paste0(samplename, "_log2_adjusted_matrix_v_tpms.png")),
+          width = 800, height = 800)
+      print(plots[[i]])
+      dev.off()
+    }
+  }
+
+
+
+
 ```
 
 ## Create a new expression matrix based on the cell type proportion and the single cell signature matrix
