@@ -25,6 +25,7 @@ library(tibble)
 library(ggplot2)
 library(ggbeeswarm)
 library(ggrepel)
+library(ggExtra)
 library(pheatmap)
 
 # set project directory
@@ -155,6 +156,41 @@ cibersortx_reduced_sigMatrix %>%
            treeheight_row = 0,
            main = "Cibersortx Reduced Adjusted Signature Matrix (scaled by row)")
 # dev.off()
+
+# save a version of the heatmap with manually mean centred and scaled proportions
+# create a new matrix for the scaled data
+cibersortx_reduced_sigMatrix_scaled <- cibersortx_reduced_sigMatrix  %>%
+  `rownames<-`(NULL) %>%
+  as.data.frame() %>%
+  tibble::column_to_rownames("GeneSymbol") %>%
+  t() %>%
+  scale(., center = TRUE, scale = TRUE) %>%
+  t()
+
+# png(filename=file.path(outdir, 'heatmap_cibersortx_reduced_signature_matrix_manually_scaled.png'), width=800, height=800)
+sigMatrix_heatmap_output <- pheatmap::pheatmap(cibersortx_reduced_sigMatrix_scaled,
+                   treeheight_row = 0,
+                   main = "mean centred and scaled sigMatrix")
+# graphics.off()
+
+# plot the distribution of scaled values for each gene
+# colour by cell-type
+# png(filename=file.path(outdir, 'density_cibersortx_reduced_signature_matrix_manually_scaled.png'), width=800, height=800)
+cibersortx_reduced_sigMatrix_scaled %>%
+  as.data.frame() %>%
+  tibble::rownames_to_column("GeneSymbol") %>%
+  melt() %>%
+  dplyr::select(GeneSymbol, cell_type = variable, value) %>%
+  ggplot(aes(x = value,
+             fill = cell_type)) +
+  geom_density(colour = "black",
+               alpha = 0.5) +
+  labs(x = "Value",
+       y = "Frequency",
+       fill = "Cell Type") +
+  theme_minimal()
+# graphics.off()
+
 ```
 
 # Cibersortx Cell-Type Proportions
