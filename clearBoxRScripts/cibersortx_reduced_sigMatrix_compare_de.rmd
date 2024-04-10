@@ -2,11 +2,22 @@
 title: "cibersortx_reduced_sigMatrix"
 author: "Melanie Smith"
 date: "27 March 2024"
-output: html_document
+output: 
+  html_document:
+      fig_show: "hold"
 ---
 
 ```{r setup, include=FALSE}
-knitr::opts_chunk$set(echo = TRUE)
+knitr::opts_chunk$set(
+    echo = TRUE,
+    message = FALSE,
+    warning = FALSE,
+    cache = FALSE,
+    fig.show='hold',
+    fig.align = "center",
+    results = "hide"
+)
+
 ```
 
 # Load required libraries
@@ -27,6 +38,9 @@ library(ggbeeswarm)
 library(ggrepel)
 library(ggExtra)
 library(pheatmap)
+# Parallel optimisation
+library(foreach)
+library(doParallel)
 
 # set project directory
 projectDir <- "/home/smit1924/preeclampsia_sex_chromosome_informed"
@@ -223,7 +237,7 @@ ggplot(data_long, aes(x = samplename, y = proportion, fill = cell_type)) +
   theme(axis.text.x = element_text(angle = 90, hjust = 1))
 
 # Reorder samplenames based on the proportion of Fetal Cytotrophoblasts
-ordered_samples_fetal_CTB <- dplyr::filter(data_long, cell_type == "Fetal.Cytotrophoblasts") %>%
+ordered_samples_fetal_CTB <- dplyr::filter(data_long, cell_type == "Cytotrophoblast") %>%
   arrange(desc(proportion)) %>%
   dplyr::pull(samplename)
 
@@ -440,70 +454,173 @@ for (name in output_directory_names) {
   dir.create(path = paste0(outdir, "/cibersortx_mixture_matrix", "/", name), showWarnings = FALSE)  # Create directory with column name
 }
 
+# Specify the samplenames of interest
+# samplenames_of_interest <- c("STP1087", "STP0677", "STP0596", "STP0148")
 
-# make and save one plot per cell type per sample
+## make and save one plot per cell type per sample
 plots <- vector("list", length(unique(log2_counts_to_plot$samplename)))
+# plots <- vector("list", 8)
+scaled_sigMatrix <- cibersortx_reduced_sigMatrix_scaled %>%
+  as.data.frame() %>%
+  tibble::rownames_to_column("GeneSymbol")
+
+# Find the maximum value in the dataset
+max_value <- max(max(log2_counts_to_plot$tpm), max(log2_counts_to_plot$cibersort))
+# Find the minimum value in the dataset
+min_value <- min(min(log2_counts_to_plot$tpm), min(log2_counts_to_plot$cibersort))
+
+for (i in seq_along(plots)) {
+  samplename <- unique(log2_counts_to_plot$samplename)[i]
+  subset <- log2_counts_to_plot[log2_counts_to_plot$samplename == samplename, ]
+  
+  for (col_name in names(cibersortx_reduced_sigMatrix)[-1]) {
+    # get the signature matrix values and combine with the tpm and cibersort values from subset
+    subset_with_sigMatrix_value <- scaled_sigMatrix[scaled_sigMatrix[, col_name] >= 2, c("GeneSymbol", col_name)] %>%
+      dplyr::left_join(., subset, by = "GeneSymbol")
     
-  for (i in seq_along(plots)) {
-    samplename <- unique(log2_counts_to_plot$samplename)[i]
-    subset <- log2_counts_to_plot[log2_counts_to_plot$samplename == samplename, ]
-      
-    for (col_name in names(cibersortx_reduced_sigMatrix)[-1]) {
-      # get the signature matrix values and combine with the tpm and cibersort values from subset
-      subset_with_sigMatrix_value <- cibersortx_reduced_sigMatrix[cibersortx_reduced_sigMatrix[, col_name] > 0, c("GeneSymbol", col_name)] %>%
-        dplyr::left_join(., subset, by = "GeneSymbol")
-        
-      # Find the maximum value in the dataset
-      max_value <- max(max(subset$tpm), max(subset$cibersort))
-      # Find the minimum value in the dataset
-      min_value <- min(min(subset$tpm), min(subset$cibersort))
-        
-      # Get the RMSE value corresponding to the current samplename
-      rmse_value <- cibersortx_reduced_proportion_rmse[cibersortx_reduced_proportion_rmse$samplename == samplename, "RMSE"]
-        
-      # Create the plot object
-      plots[[i]] <- ggplot(data = subset,
-                           aes(x = tpm,
-                               y = cibersort)) +
-        geom_point(alpha = 0.5) +
-        # Add line of best fit
-        geom_smooth(method = "lm", se = FALSE) +
-        # set x and y axis limits
-        xlim(min_value, max_value) +
-        ylim(min_value, max_value) +
-        # Add x=y line
-        geom_abline(intercept = 0,
-                    slope = 1,
-                    color = "red",
-                    linetype = "dashed") +
-        # add the RMSE value in the top left corner
-        geom_text(x = min(subset$tpm),
-                  y = max(subset$cibersort),
-                  label = paste("RMSE:", round(rmse_value, 2)),
-                  hjust = -1,
-                  color = "black") +
-        # add a second layer of points coloured by sigMatrix value
-        geom_point(data = subset_with_sigMatrix_value,
-                   aes_string(x = "tpm",
-                              y = "cibersort",
-                              colour = paste("log2(", col_name, ")", sep = ""))) +
-        scale_color_gradient(name = paste("Cibersort SigMatrix (log2 ", col_name, ")", sep = ""),
-                             low = "lightblue",
-                             high = "darkblue") +
-        # update main and axis labels
-        labs(x = "log2 tpm + 0.01",
-             y = "Cibersortx Mixture Matrix",
-             title = samplename) +
-        theme_bw() +
-        theme(legend.position = "bottom")
-      
-      # Save the plot as a PNG file
-      png(filename = file.path(outdir, "cibersortx_mixture_matrix", col_name, paste0(samplename, "_log2_adjusted_matrix_v_tpms.png")),
-          width = 800, height = 800)
-      print(plots[[i]])
-      dev.off()
-    }
+    # Get the RMSE value corresponding to the current samplename
+    rmse_value <- cibersortx_reduced_proportion_rmse[cibersortx_reduced_proportion_rmse$samplename == samplename, "RMSE"]
+    
+    # Create the plot object
+    p <- ggplot(data = subset,
+                         aes(x = tpm,
+                             y = cibersort)) +
+      geom_point() +
+      # Add line of best fit
+      # geom_smooth(method = "lm", se = FALSE) +
+      # set x and y axis limits
+      xlim(min_value, max_value) +
+      ylim(min_value, max_value) +
+      # Add x=y line
+      geom_abline(intercept = 0,
+                  slope = 1,
+                  color = "red",
+                  linetype = "dashed") +
+      # add the RMSE value in the top left corner
+      geom_text(x = min(subset$tpm),
+                y = max(subset$cibersort),
+                label = paste("RMSE:", round(rmse_value, 2)),
+                hjust = -1,
+                color = "black") +
+      # add a second layer of points coloured by sigMatrix value
+      geom_point(data = subset_with_sigMatrix_value,
+                 aes_string(x = "tpm",
+                            y = "cibersort",
+                            # colour = paste("log2(", col_name, ")", sep = ""))) +
+                            colour = col_name)) +
+      scale_color_gradient(name = paste("Cibersort SigMatrix (log2 ", col_name, ")", sep = ""),
+                           low = "white",
+                           high = "red") +
+      # update main and axis labels
+      labs(x = "log2 tpm + 0.01",
+           y = "Cibersortx Mixture Matrix",
+           title = samplename)  +
+      theme_bw() +
+      theme(legend.position = "bottom")
+    
+    
+      # Add marginal plots
+    plots[[i]] <- ggExtra::ggMarginal(p, type = "boxplot")
+    
+    
+    # Save the plot as a PNG file
+    png(filename = file.path(outdir, "cibersortx_mixture_matrix", col_name, paste0(samplename, "_log2_adjusted_matrix_v_tpms.png")),
+        width = 800, height = 800)
+    print(plots[[i]])
+    dev.off()
   }
+}
+
+
+
+```
+
+## Plot the residuals between the _Observed Data_ (tpms) and the _Predicted Data_ (cibersort)
+
+```{r}
+dir.create(path = paste0(outdir, "/cibersortx_mixture_matrix", "/residualPlots"),
+           showWarnings = FALSE)
+
+
+# Specify the samplenames of interest
+# samplenames_of_interest <- c("STP1087", "STP0677", "STP0596", "STP0148")
+
+## make and save one plot per cell type per sample
+plots <- vector("list", length(unique(log2_counts_to_plot$samplename)))
+# plots <- vector("list", 8)
+scaled_sigMatrix <- cibersortx_reduced_sigMatrix_scaled %>%
+  as.data.frame() %>%
+  tibble::rownames_to_column("GeneSymbol")
+
+for (i in seq_along(plots)) {
+  samplename <- unique(log2_counts_to_plot$samplename)[i]
+  subset <- log2_counts_to_plot[log2_counts_to_plot$samplename == samplename, ] %>%
+    dplyr::mutate(., residuals = tpm-cibersort)
+  
+  for (col_name in names(cibersortx_reduced_sigMatrix)[-1]) {
+    # get the signature matrix values and combine with the tpm and cibersort values from subset
+    subset_with_sigMatrix_value <- scaled_sigMatrix[scaled_sigMatrix[, col_name] >= 2, c("GeneSymbol", col_name)] %>%
+      dplyr::left_join(., subset, by = "GeneSymbol")
+    
+    # Get the RMSE value corresponding to the current samplename
+    rmse_value <- cibersortx_reduced_proportion_rmse[cibersortx_reduced_proportion_rmse$samplename == samplename, "RMSE"]
+    
+    # Create the plot object
+    plots[[i]] <- ggplot(data = subset,
+                aes(x = cibersort,
+                    y = residuals)) +
+      geom_point() +
+      
+      # set x and y limits
+      xlim(-7, 17) +
+      ylim(-10, 10) +
+
+      # Add horizontal line at 0
+      geom_abline(intercept = 0,
+                  slope = 0,
+                  color = "red",
+                  linetype = "dashed") +
+      
+      # add the RMSE value in the top left corner
+      geom_text(x = min(subset$cibersort),
+                y = max(subset$residuals),
+                label = paste("RMSE:", round(rmse_value, 2)),
+                hjust = -1,
+                color = "black") +
+      # update main and axis labels
+      labs(x = "cibersortx addjusted mixture matrix",
+           y = "Residuals (residuals = tpm-cibersort)",
+           title = paste(samplename, " Residuals vs. Fitted Values"))  +
+      theme_bw() +
+      theme(legend.position = "bottom")
+
+    
+    # Save the plot as a PNG file
+    png(filename = file.path(outdir, "cibersortx_mixture_matrix", "residualPlots", paste0(samplename, "_residuals_vs_fitted.png")),
+        width = 800, height = 300)
+    print(plots[[i]])
+    dev.off()
+  }
+}
+
+
+require(graphics)
+# Create QQ plot with observed values
+qqnorm(subset$tpm, main = "QQ Plot")
+
+# Add a line to represent the theoretical quantiles
+qqline(subset$tpm, col = 2)
+
+# Calculate mean and standard deviation of observed data
+mean_observed <- mean(subset$tpm)
+sd_observed <- sd(subset$tpm)
+
+# Generate expected values based on normal distribution with the same mean and standard deviation
+expected <- rnorm(length(subset$tpm), mean = mean_observed, sd = sd_observed)
+
+# Plot expected values in red
+points(qqnorm(expected, plot.it = FALSE), col = "red")
+
 
 
 
