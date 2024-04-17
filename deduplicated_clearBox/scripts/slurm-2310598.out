@@ -1,0 +1,46 @@
+Found /scratch/user/smit1924/preeclampsia_sex_chromosome_informed
+Made /scratch/user/smit1924/preeclampsia_sex_chromosome_informed/deduplicated_clearBox/readCounts
+
+        ==========     _____ _    _ ____  _____  ______          _____  
+        =====         / ____| |  | |  _ \|  __ \|  ____|   /\   |  __ \ 
+          =====      | (___ | |  | | |_) | |__) | |__     /  \  | |  | |
+            ====      \___ \| |  | |  _ <|  _  /|  __|   / /\ \ | |  | |
+              ====    ____) | |__| | |_) | | \ \| |____ / ____ \| |__| |
+        ==========   |_____/ \____/|____/|_|  \_\______/_/    \_\_____/
+	  v2.0.3
+
+//========================== featureCounts setting ===========================\\
+||                                                                            ||
+||             Input files : 6 BAM files                                      ||
+||                                                                            ||
+||                           SCP3954_marked_duplicates.bam                    ||
+||                           SCP4733_marked_duplicates.bam                    ||
+||                           STP0148_marked_duplicates.bam                    ||
+||                           STP0596_marked_duplicates.bam                    ||
+||                           STP0932_marked_duplicates.bam                    ||
+||                           STP1206_marked_duplicates.bam                    ||
+||                                                                            ||
+||             Output file : counts.out                                       ||
+||                 Summary : counts.out.summary                               ||
+||              Paired-end : yes                                              ||
+||        Count read pairs : yes                                              ||
+||              Annotation : gencode.v29.annotation.gtf (GTF)                 ||
+||      Dir for temp files : /scratch/user/smit1924/preeclampsia_sex_chro ... ||
+||                                                                            ||
+||                 Threads : 16                                               ||
+||                   Level : meta-feature level                               ||
+||      Multimapping reads : not counted                                      ||
+|| Multi-overlapping reads : not counted                                      ||
+||   Min overlapping bases : 1                                                ||
+||   Min overlapping frac. : 100.0% to reads                                  ||
+||                                                                            ||
+\\============================================================================//
+
+//================================= Running ==================================\\
+||                                                                            ||
+|| Load annotation file gencode.v29.annotation.gtf ...                        ||
+||    Features : 1262773                                                      ||
+||    Meta-features : 58721                                                   ||
+||    Chromosomes/contigs : 25                                                ||
+||                                                                            ||
+|| Process BAM file SCP3954_marked_duplicates.bam...                          ||
