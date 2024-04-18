@@ -129,7 +129,7 @@ y <- edgeR::DGEList(counts = raw_data %>% dplyr::select(-Length),
 
 y
 y$genes # A Length column is present 
-dim(y)
+dim(y) # 58676 6
 
 head(y$counts) # Gene names are set as rownames
 y$samples$lib.size # 11241651  5144473 14027324  5676726  6370904  5921367
@@ -174,7 +174,11 @@ gene_data <- data.frame(ensembl_gene_id = all_gencode_v29@elementMetadata$gene_i
 # we're left with multiple identical rows, keep one each
 gencode_v29_gene_id_symbol_chr_biotype <- gene_data %>%
   dplyr::distinct(, .keep_all = TRUE)
+dim(gencode_v29_gene_id_symbol_chr_biotype) # 64837 3
+dim(gencode_v29_gene_id_symbol_chr_biotype[!duplicated(gencode_v29_gene_id_symbol_chr_biotype$ensembl_gene_id), ]) # 64792 3
 
+# remove duplicates
+gencode_v29_gene_id_symbol_chr_biotype <- gencode_v29_gene_id_symbol_chr_biotype[!duplicated(gencode_v29_gene_id_symbol_chr_biotype$ensembl_gene_id), ]
 ```
 
 ### add the gene info to the tpms
@@ -185,6 +189,8 @@ tpm_gene_id_symbol_chr_biotype <- data.frame(tpm) %>%
   tibble::rownames_to_column("ensembl_gene_id") %>%
   dplyr::left_join(., gencode_v29_gene_id_symbol_chr_biotype, by = "ensembl_gene_id") %>%
   dplyr::select(colnames(gencode_v29_gene_id_symbol_chr_biotype), colnames(data.frame(tpm)))
+
+dim(tpm_gene_id_symbol_chr_biotype)
 
 # save a copy of the tpm counts with the gene info
 tpm_gene_id_symbol_chr_biotype %>%
