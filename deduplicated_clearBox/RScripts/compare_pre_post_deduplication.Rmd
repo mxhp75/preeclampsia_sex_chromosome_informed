@@ -1,0 +1,192 @@
+---
+title: "Compare placenta counts pre and post deduplication"
+author: "Melanie Smith"
+date: "27 March 2024"
+output: 
+  html_document:
+      fig_show: "hold"
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(
+    echo = TRUE,
+    message = FALSE,
+    warning = FALSE,
+    cache = FALSE,
+    fig.show='hold',
+    fig.align = "center",
+    results = "hide"
+)
+
+```
+
+# Load required libraries
+
+```{r load Libraries}
+library(plyr)
+library(reshape2)
+library(dplyr)
+library(tidyr)
+library(stringr)
+library(edgeR)
+library(readxl)
+library(readr)
+library(magrittr)
+library(tibble)
+library(ggplot2)
+library(ggbeeswarm)
+library(ggrepel)
+library(ggExtra)
+library(pheatmap)
+# Parallel optimisation
+library(foreach)
+library(doParallel)
+# samtools
+library(Rsamtools)
+
+# set project directory
+projectDir <- "/home/smit1924/preeclampsia_sex_chromosome_informed"
+expt_name <- "deduplicated_bams"
+
+
+outdir <- file.path(projectDir, "deduplicated_clearBox/output")
+
+genome_gtf_infile <- file.path(projectDir, "clearBoxCleanData/gencode.v29.annotation.gtf")
+gencodev29_gff_inFile <- file.path(projectDir, "clearBoxCleanData/gencode.v29.chr_patch_hapl_scaff.annotation.gff3")
+input_metadata_file <- file.path(projectDir, "clearBoxRawData/cleanSampleMetadata.csv")
+input_counts_deduplicated <- file.path(projectDir, "deduplicated_clearBox/readCounts/deduplicated_readCounts.txt")
+dedup_cpm_file <- file.path(outdir, "cpm_dedup.txt")
+dedup_log2cpm_file <- file.path(outdir, "log2cpm_dedup.txt")
+deduplicated_log2cpms_no_gene_names_file <- file.path(outdir, "deduplicated_log2cpms_no_gene_names.txt")
+log2cpm_20240418_file <- file.path(projectDir, "clearBoxCleanData/20240418_log2cpm.txt")
+
+dge_list_obj_file <- file.path(projectDir, "noCovariate_output/DGEList_filtered_normalised.rds")
+metadata_quality_file <- file.path(projectDir, "clearBoxCleanData/metadata_quality.csv")
+
+dedup_samples <- c("STP0148", "SCP3954", "STP1206", "STP0932", "SCP4733", "STP0596")
+dir.create(outdir)
+
+# set max digits
+options(digits=3)
+
+```
+
+# Import all input data tables
+
+```{r}
+
+## DGEList object
+dge_list_obj <- readRDS(dge_list_obj_file)
+# metadata file
+metadata_quality <- read_csv(file = metadata_quality_file)
+# deduplicated cpms
+dedup_cpm <- read.table(file = dedup_cpm_file, header = TRUE, sep = "\t") %>%
+  rename_at(vars(starts_with("SC") | starts_with("ST")), ~paste0(., "_dedup"))
+dim(dedup_cpm) # 12367 9
+# check for duplicated ensembl gene IDs in the row names
+dim(dedup_cpm[!duplicated(dedup_cpm$gene), ]) # 12367 9
+
+# deduplicated lcpms
+dedup_lcpm <- read.table(file = dedup_log2cpm_file, header = TRUE, sep = "\t") %>%
+  rename_at(vars(starts_with("SC") | starts_with("ST")), ~paste0(., "_dedup"))
+dim(dedup_lcpm) # 12367 9
+```
+
+# create cpm matrix for original counts
+
+```{r}
+# extract the raw counts
+raw_counts <- dge_list_obj$counts
+dim(raw_counts) # 13701 58
+# check for duplicated ensembl gene IDs in the row names
+dim(raw_counts[!duplicated(rownames(raw_counts)), ]) # 13701 58
+
+# create a log 2 cpm object for later use
+lcpm <- edgeR::cpm(dge_list_obj, log = TRUE)
+# create an un-logged cpm object for later use
+cpm <- edgeR::cpm(dge_list_obj, log = FALSE)
+```
+
+# combine logged cpm matrices
+
+```{r}
+
+combined_log2cpm <- dplyr::left_join(dedup_lcpm, data.frame(lcpm) %>% tibble::rownames_to_column("gene"), by = "gene")
+
+
+# I have confirmed that the dedup matrix has no duplicate ensembl ids
+# start by subsetting the non-dedup lcpms to conly contain the gene ids from the dedup matrix
+subset_non_dedup_lcpm <- subset(lcpm, rownames(lcpm) %in% dedup_lcpm$gene) %>%
+  as.data.frame()
+dim(subset_non_dedup_lcpm) # 12212 58
+
+new_combined_lcpm <- dplyr::left_join(subset_non_dedup_lcpm %>% tibble::rownames_to_column("gene"), dedup_lcpm, by = "gene")
+dim(new_combined_lcpm) # 12212 67
+
+
+
+
+
+temp <- new_combined_lcpm %>%
+  dplyr::select(., gene, STP0148, STP0148_dedup) %>%
+  dplyr::mutate(., diff = STP0148_dedup-STP0148)
+
+
+
+
+
+```
+
+# Scatter plots of logged cpms
+
+```{r}
+# set the min and max axis values for the plots
+# Get column names of numeric columns
+numeric_cols <- sapply(new_combined_lcpm, is.numeric)
+# Find the maximum value for each numeric column
+max_values <- sapply(new_combined_lcpm[, numeric_cols],
+                     max,
+                     na.rm = TRUE)
+# Find the overall maximum value
+overall_max <- round(max(max_values,
+                         na.rm = TRUE), 0)
+# Find the minimum value for each numeric column
+min_values <- sapply(new_combined_lcpm[, numeric_cols],
+                     min,
+                     na.rm = TRUE)
+# Find the overall maximum value
+overall_min <- round(min(min_values,
+                         na.rm = TRUE), 0)
+
+samplename <- "STP0148"
+
+png(filename = file.path(outdir, paste0(samplename, "_compare_dedup.png")),
+    width = 800, height = 800)
+new_combined_lcpm %>%
+  ggplot() +
+  geom_point(aes_string(x = samplename,
+                 y = paste0(samplename, "_dedup"))) +
+        # set x and y axis limits
+      xlim(overall_min, overall_max) +
+      ylim(overall_min, overall_max) +
+        geom_abline(intercept = 0,
+                  slope = 1,
+                  color = "red",
+                  linetype = "dashed") +
+        # update main and axis labels
+      labs(x = "log2 cpm",
+           y = "dedup log2 cpms",
+           title = samplename)  +
+  theme_bw()
+dev.off()
+
+
+```
+# scatter plot of raw counts
+
+```{r}
+
+```
+
+
+
