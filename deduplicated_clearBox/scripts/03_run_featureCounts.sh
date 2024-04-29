@@ -9,7 +9,7 @@
 #SBATCH --mem=16GB
 
 # Notification configuration
-#SBATCH --job-name=_deduplicated_featureCounts
+#SBATCH --job-name=20240429_deduplicated_featureCounts
 #SBATCH --mail-type=END
 #SBATCH --mail-type=FAIL
 #SBATCH --mail-user=melanie.smith@flinders.edu.au
