@@ -62,8 +62,11 @@ fi
 # Feature Counts - obtaining all sorted bam files
 SAMPLES=$(find "${ALIGN_OUTPUT}" -name "*_marked_duplicates.bam" | tr '\n' ' ')
 
+# This is the exact version and command from the clearbox counts
+# Program:featureCounts v2.0.3; Command:"featureCounts" "-a" "/scratch/user/smit1924/refSeq/ref_annotations/gencode.v29.annotation.gtf" "-T" "16" "-s" "2" "-p" "--countReadPairs" "-g" "gene_id" "-o" "/scratch/user/smit1924/20230608_male_grch38/readCounts/test_s2_counts.out"
+
 # Running featureCounts on the *deduplicated* bam files
-featureCounts -Q 10 -p --countReadPairs -g gene_id --fracOverlap 1 -T "${cores}" -a "${GRCh38_GTF}" -o "${READ_COUNTS}/counts.out" ${SAMPLES}
+featureCounts -a "${GRCh38_GTF}" -T "${cores}" -s 2 -p --countReadPairs -g gene_id -o "${READ_COUNTS}/counts.out" ${SAMPLES}
 
 # Storing the output in a single file
 cut -f1,7- "${READ_COUNTS}/counts.out" | sed 1d > "${READ_COUNTS}/deduplicated_readCounts.txt"
