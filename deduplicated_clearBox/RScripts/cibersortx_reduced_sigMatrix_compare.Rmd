@@ -1,0 +1,304 @@
+---
+title: "cibersortx_reduced_sigMatrix_compare"
+author: "Melanie Smith"
+date: "29 April 2024"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(
+    echo = TRUE,
+    message = FALSE,
+    warning = FALSE,
+    cache = FALSE,
+    fig.show='hold',
+    fig.align = "center",
+    results = "hide"
+)
+
+```
+
+# Load required libraries
+
+```{r load Libraries}
+library(plyr)
+library(reshape2)
+library(dplyr)
+library(tidyr)
+library(stringr)
+library(edgeR)
+library(readxl)
+library(readr)
+library(magrittr)
+library(tibble)
+library(ggplot2)
+library(ggbeeswarm)
+library(ggrepel)
+library(ggExtra)
+library(pheatmap)
+# Parallel optimisation
+library(foreach)
+library(doParallel)
+# samtools
+library(Rsamtools)
+
+
+# set project directory
+projectDir <- "/home/smit1924/preeclampsia_sex_chromosome_informed"
+
+# set experiment name
+expt_name <- 'deduplicated_bams'
+
+# input files
+input_genome_gtf_file <- file.path(projectDir, "clearBoxCleanData/gencode.v29.annotation.gtf")
+input_genome_gff3_file <- file.path(projectDir, "clearBoxCleanData/gencode.v29.chr_patch_hapl_scaff.annotation.gff3")
+input_counts_deduplicated_file <- file.path(projectDir, "deduplicated_clearBox/readCounts/20240429_deduplicated_s2_readCounts.txt")
+input_metadata_file <- file.path(projectDir, "clearBoxRawData/cleanSampleMetadata.csv")
+
+input_dedup_no_split_ensembl_six_log2cpm_file <- file.path(projectDir, "deduplicated_clearBox/output", "dedup_no_split_ensembl_six_log2cpm.txt")
+input_deduplicated_tpm_bulkCountMatrix_all_gene_symbol_six_dedup_file <- file.path(projectDir, "deduplicated_clearBox/output", "deduplicated_tpm_bulkCountMatrix_all_gene_symbol_six_dedup.txt")
+input_deduplicated_tpm_bulkCountMatrix_six_dedup_file <- file.path(projectDir, "deduplicated_clearBox/output", "deduplicated_tpm_bulkCountMatrix_six_dedup.txt")
+input_deduplicated_six_cpm_file <- file.path(projectDir, "deduplicated_clearBox/output", "deduplicated_six_cpm.txt")
+input_deduplicated_six_log2cpms_yes_gene_names_file <- file.path(projectDir, "deduplicated_clearBox/output", "deduplicated_six_log2cpms_yes_gene_names.txt")
+input_dedup_no_split_ensembl_six_log2cpm_file <- file.path(projectDir, "deduplicated_clearBox/output", "dedup_no_split_ensembl_six_log2cpm.txt")
+
+cibersortx_proportion_file <- file.path(projectDir, "cibersortx/outdir/CIBERSORTx_Adjusted.txt")
+cibersortx_sigMatrix_file <- file.path(projectDir, "cibersortx/outdir/CIBERSORTx_sigmatrix_Adjusted.txt")
+cibersortx_reduced_proportion_file <- file.path(projectDir, "cibersortx_reduced_sigMatrix/outdir/CIBERSORTx_Adjusted.txt")
+cibersortx_reduced_sigMatrix_file <- file.path(projectDir, "cibersortx_reduced_sigMatrix/outdir/CIBERSORTx_sigmatrix_Adjusted.txt")
+cibersortx_reduced_mixture_adjusted_file <- file.path(projectDir, "cibersortx_reduced_sigMatrix/outdir/CIBERSORTx_Mixtures_Adjusted.txt")
+
+# set the output directory
+outdir <- file.path(projectDir, "deduplicated_clearBox/output/sigMatrixScatterPlots")
+
+dedup_samples <- c("STP0148", "SCP3954", "STP1206", "STP0932", "SCP4733", "STP0596")
+
+# set max digits
+options(digits=3)
+
+`%notin%` <- Negate(`%in%`)
+
+```
+
+# Import all input data tables
+## Metadata
+
+```{r}
+## Metadata
+metadata <- read_csv(file = input_metadata_file)
+dedup_metadata <- dplyr::filter(metadata, samplename %in% dedup_samples)
+```
+
+## Deduplicated count tables
+
+```{r}
+dedup_no_split_ensembl_six_log2cpm <- read.table(file = input_dedup_no_split_ensembl_six_log2cpm_file,
+                                                 header = TRUE,
+                                                 sep = "\t")
+deduplicated_tpm_bulkCountMatrix_all_gene_symbol_six_dedup <- read.table(file = input_deduplicated_tpm_bulkCountMatrix_all_gene_symbol_six_dedup_file,
+                                                 header = TRUE,
+                                                 sep = "\t")
+# ## clean up the tpm table to remove genes with zero in all columns
+# # Find indices of columns to exclude
+# exclude_columns <- c("gene", "hgnc_symbol", "seqnames")
+# exclude_indices <- which(colnames(deduplicated_tpm_bulkCountMatrix_all_gene_symbol_six_dedup) %in% exclude_columns)
+# # Calculate rowSums excluding specified columns
+# rowSums_excluded <- rowSums(deduplicated_tpm_bulkCountMatrix_all_gene_symbol_six_dedup[, -exclude_indices])
+# # Subset the data frame based on rowSums to drop rows with zero counts in all columns
+# deduplicated_tpm_bulkCountMatrix_all_gene_symbol_six_dedup <- deduplicated_tpm_bulkCountMatrix_all_gene_symbol_six_dedup[rowSums_excluded > 0, ]
+
+deduplicated_tpm_bulkCountMatrix_six_dedup <- read.table(file = input_deduplicated_tpm_bulkCountMatrix_six_dedup_file,
+                                                 header = TRUE,
+                                                 sep = "\t")
+deduplicated_six_cpm <- read.table(file = input_deduplicated_six_cpm_file,
+                                                 header = TRUE,
+                                                 sep = "\t")
+deduplicated_six_log2cpms_yes_gene_names <- read.table(file = input_deduplicated_six_log2cpms_yes_gene_names_file,
+                                                 header = TRUE,
+                                                 sep = "\t")
+
+dedup_no_split_ensembl_six_log2cpm <- read.table(file = input_dedup_no_split_ensembl_six_log2cpm_file,
+                                                 header = TRUE,
+                                                 sep = "\t")
+
+
+
+
+```
+
+## Cibersortx infiles
+
+```{r}
+# CIBERSORTx signature matrix and proportion files - reduced cell types
+cibersortx_reduced_proportion <- read.table(file = cibersortx_reduced_proportion_file, header = TRUE, sep = "\t") %>%
+  dplyr::select(., samplename = Mixture, everything()) %>%
+  dplyr::select(., -'P.value', -'Correlation', -'RMSE')
+
+# CIBERSORTx proportion file with RMSE  - reduced cell types
+cibersortx_reduced_proportion_rmse <- read.table(file = cibersortx_reduced_proportion_file, header = TRUE, sep = "\t") %>%
+  dplyr::select(., samplename = Mixture, everything())
+
+cibersortx_reduced_sigMatrix <- read.table(file = cibersortx_reduced_sigMatrix_file, header = TRUE, sep = "\t")
+# remove rows that contain all zero counts in the signature matrix
+cibersortx_reduced_sigMatrix <- cibersortx_reduced_sigMatrix[rowSums(cibersortx_reduced_sigMatrix[,-1])>0,]
+dim(cibersortx_reduced_sigMatrix)
+# create a new matrix for the scaled data
+cibersortx_reduced_sigMatrix_scaled <- cibersortx_reduced_sigMatrix  %>%
+  `rownames<-`(NULL) %>%
+  as.data.frame() %>%
+  tibble::column_to_rownames("GeneSymbol") %>%
+  t() %>%
+  scale(., center = TRUE, scale = TRUE) %>%
+  t()
+
+# CIBERSORTx adjusted mixture - reduced cell types
+cibersortx_reduced_mixture_adjusted <- read.table(file = cibersortx_reduced_mixture_adjusted_file, header = TRUE, sep = "\t")
+# keep only samples with deduplicated counts
+cibersortx_reduced_mixture_adjusted <- cibersortx_reduced_mixture_adjusted[, colnames(cibersortx_reduced_mixture_adjusted) %in% c("GeneSymbol", dedup_samples)]
+
+```
+
+# Predicted gene expression
+## Scatter plot of the adjusted matrix versus the sample tpms
+
+```{r}
+
+# duplicate_rows <- deduplicated_tpm_bulkCountMatrix_all_gene_symbol_six_dedup[duplicated(deduplicated_tpm_bulkCountMatrix_all_gene_symbol_six_dedup$hgnc_symbol) | duplicated(deduplicated_tpm_bulkCountMatrix_all_gene_symbol_six_dedup$hgnc_symbol, fromLast = TRUE),]
+#
+# duplicate_rows_log2cpms <- deduplicated_six_log2cpms_yes_gene_names[duplicated(deduplicated_six_log2cpms_yes_gene_names$hgnc_symbol) | duplicated(deduplicated_six_log2cpms_yes_gene_names$hgnc_symbol, fromLast = TRUE),]
+# 
+# duplicate_rows <- dedup_no_split_ensembl_six_log2cpm[duplicated(dedup_no_split_ensembl_six_log2cpm$hgnc_symbol) | duplicated(dedup_no_split_ensembl_six_log2cpm$hgnc_symbol, fromLast = TRUE),]
+# 
+# subset_table <- dedup_no_split_ensembl_six_log2cpm[grepl("^ENSG00000285258", dedup_no_split_ensembl_six_log2cpm$Geneid) | grepl("^ENSG00000163635", dedup_no_split_ensembl_six_log2cpm$Geneid),]
+
+
+
+# there are 26 genes in the tpm matrix with duplicated gene names as an artifact of the original join - delete one and move on with life initial dim 13784 x 62
+# Find the indices of the first occurrence of each unique gene name
+first_indices <- !duplicated(deduplicated_tpm_bulkCountMatrix_all_gene_symbol_six_dedup$hgnc_symbol)
+
+# Subset the matrix to keep only the rows with the first occurrence of duplicated gene names
+tpm <- deduplicated_tpm_bulkCountMatrix_all_gene_symbol_six_dedup[first_indices, ]
+dim(tpm) # 57133 9
+
+# subset each table to include only genes in the signature matrix by gene name
+intersect_cibersort_adjusted_mixture <- subset(cibersortx_reduced_mixture_adjusted, GeneSymbol %in% cibersortx_reduced_sigMatrix$GeneSymbol) %>%
+  melt() %>%
+  dplyr::select(., GeneSymbol, samplename = variable, cibersort = value) # 223260 3
+
+intersect_tpm <- subset(tpm, hgnc_symbol %in% cibersortx_reduced_sigMatrix$GeneSymbol) %>%
+  melt() %>%
+  dplyr::select(., GeneSymbol = hgnc_symbol, samplename = variable, tpm = value) # 21960 3
+
+# join the tables for ggplot - raw data
+counts_to_plot <- dplyr::full_join(intersect_cibersort_adjusted_mixture, intersect_tpm, by = c("GeneSymbol", "samplename"))
+# ggplot(data = counts_to_plot,
+#        aes(x = tpm,
+#            y = cibersort,
+#            color = samplename)) +
+#   geom_point()
+
+# lets log the counts so we can get a better view of the scatter
+# save which columns are numeric
+id_numeric <- sapply(counts_to_plot, is.numeric)
+# make a copy of the raw data to transform
+log2_counts_to_plot <- counts_to_plot
+# Replace negative values with zero
+log2_counts_to_plot[, id_numeric][log2_counts_to_plot[, id_numeric] < 0] <- 0
+# transform the raw data
+log2_counts_to_plot[, id_numeric] <- log2(log2_counts_to_plot[, id_numeric] + .01)
+
+```
+
+## Scatterplots per cell-type per sample
+- after talking with Kat we decided we needed more resolution in the tpm v mixture matrix scatter plots.  
+- to this end I will make new scatter plots, one per cell type per sample.  
+- each plot will have the non-zero signature genes graded by expression value.  
+
+```{r, eval=FALSE}
+
+# lets create the new folders we need to hold all the plots
+# each folder will be named by cell type from the proportion table
+output_directory_names <- colnames(cibersortx_reduced_proportion[,-1])
+name <- output_directory_names[1]
+# Create directories based on column names
+for (name in output_directory_names) {
+  dir.create(path = paste0(outdir, "/", name), showWarnings = FALSE)  # Create directory with column name
+}
+
+# Specify the samplenames of interest
+# samplenames_of_interest <- c("STP1087", "STP0677", "STP0596", "STP0148")
+
+## make and save one plot per cell type per sample
+plots <- vector("list", length(unique(log2_counts_to_plot$samplename)))
+# plots <- vector("list", 8)
+scaled_sigMatrix <- cibersortx_reduced_sigMatrix_scaled  %>%
+  as.data.frame() %>%
+  tibble::rownames_to_column("GeneSymbol")
+
+# Find the maximum value in the dataset
+max_value <- max(max(log2_counts_to_plot$tpm), max(log2_counts_to_plot$cibersort))
+# Find the minimum value in the dataset
+min_value <- min(min(log2_counts_to_plot$tpm), min(log2_counts_to_plot$cibersort))
+
+for (i in seq_along(plots)) {
+  samplename <- unique(log2_counts_to_plot$samplename)[i]
+  subset <- log2_counts_to_plot[log2_counts_to_plot$samplename == samplename, ]
+  
+  for (col_name in names(cibersortx_reduced_sigMatrix)[-1]) {
+    # get the signature matrix values and combine with the tpm and cibersort values from subset
+    subset_with_sigMatrix_value <- scaled_sigMatrix[scaled_sigMatrix[, col_name] >= 2, c("GeneSymbol", col_name)] %>%
+      dplyr::left_join(., subset, by = "GeneSymbol")
+    
+    # Get the RMSE value corresponding to the current samplename
+    rmse_value <- cibersortx_reduced_proportion_rmse[cibersortx_reduced_proportion_rmse$samplename == samplename, "RMSE"]
+    
+    # Create the plot object
+    p <- ggplot(data = subset,
+                         aes(x = tpm,
+                             y = cibersort)) +
+      geom_point() +
+      # Add line of best fit
+      # geom_smooth(method = "lm", se = FALSE) +
+      # set x and y axis limits
+      xlim(min_value, max_value) +
+      ylim(min_value, max_value) +
+      # Add x=y line
+      geom_abline(intercept = 0,
+                  slope = 1,
+                  color = "red",
+                  linetype = "dashed") +
+      # add the RMSE value in the top left corner
+      geom_text(x = min(subset$tpm),
+                y = max(subset$cibersort),
+                label = paste("RMSE:", round(rmse_value, 2)),
+                hjust = -1,
+                color = "black") +
+      # add a second layer of points coloured by sigMatrix value
+      geom_point(data = subset_with_sigMatrix_value,
+                 aes_string(x = "tpm",
+                            y = "cibersort",
+                            # colour = paste("log2(", col_name, ")", sep = ""))) +
+                            colour = col_name)) +
+      scale_color_gradient(name = paste("Cibersort SigMatrix (log2 ", col_name, ")", sep = ""),
+                           low = "white",
+                           high = "red") +
+      theme_bw() +
+      theme(legend.position = "bottom")
+    
+    
+      # Add marginal plots
+    plots[[i]] <- ggExtra::ggMarginal(p, type = "boxplot")
+    
+    
+    # Save the plot as a PNG file
+    png(filename = file.path(outdir, col_name, paste0(samplename, "_log2_adjusted_matrix_v_tpms.png")),
+        width = 800, height = 800)
+    print(plots[[i]])
+    dev.off()
+  }
+}
+
+
+
+```
