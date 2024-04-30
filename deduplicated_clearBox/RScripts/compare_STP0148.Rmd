@@ -46,8 +46,6 @@ library(doParallel)
 # samtools
 library(Rsamtools)
 
-
-
 # set project directory
 projectDir <- "/home/smit1924/preeclampsia_sex_chromosome_informed"
 expt_name <- "STP0148_compareCounts"
@@ -58,15 +56,19 @@ input_metadata_file <- file.path(projectDir, "clearBoxRawData/cleanSampleMetadat
 input_metadata_quality_file <- file.path(projectDir, "clearBoxCleanData/metadata_quality.csv")
 
 # input files (counts)
-input_sixSample_dedup_featureCounts_file <- file.path(projectDir, "STP0148_compareCounts/deduplicated_readCounts.txt")
-input_STP0148_dedup_featureCounts_s2_file <- file.path(projectDir, "STP0148_compareCounts/s2_STP0148_dedup_readCounts.txt")
 input_STP0148_STAR_geneCount_file <- file.path(projectDir, "STP0148_compareCounts/STP_0148_GRCh38_ReadsPerGene.out.tab")
+input_STP0148_featureCounts_s2_20240424_file <- file.path(projectDir, "STP0148_compareCounts/STP0148_featureCounts_s2_20240424.txt")
+input_STP0148_dedup_featureCounts_s2_file <- file.path(projectDir, "STP0148_compareCounts/s2_STP0148_dedup_readCounts.txt")
 input_sixSample_dedup_featureCounts_s2_file <- file.path(projectDir, "STP0148_compareCounts/s2_deduplicated_readCounts.txt")
-input_allMale_featureCounts_s2_file <- file.path(projectDir, "STP0148_compareCounts/featureCounts_v2.0.3_male_readCounts.txt")
+input_allMale_featureCounts_s2_20230608_file <- file.path(projectDir, "STP0148_compareCounts/featureCounts_v2.0.3_male_readCounts.txt")
+input_allMale_featureCounts_s2_20240424_file <- file.path(projectDir, "STP0148_compareCounts/20240424_male_readCounts.txt")
+input_allMale_featureCounts_s2_20240426_file <- file.path(projectDir, "STP0148_compareCounts/20240426_male_readCounts.txt") # no quality or overlap flag
+
 
 # set the output directory
 outdir <- file.path(projectDir, "STP0148_compareCounts/outDirectory")
 
+output_combined_log2_counts_file <- file.path(projectDir, expt_name, "combined_log2_counts.txt")
 
 dedup_samples <- c("STP0148", "SCP3954", "STP1206", "STP0932", "SCP4733", "STP0596")
 
@@ -76,30 +78,58 @@ options(digits=3)
 ```
 
 # Import all input data tables
-## sixSample_dedup_featureCounts
+## Metadata table
+```{r}
+# metadata file
+metadata_quality <- read_csv(file = input_metadata_quality_file)
+```
+
+## STP0148_STAR_geneCount 
 
 ```{r}
 
-# metadata file
-metadata_quality <- read_csv(file = input_metadata_quality_file)
+# import the count table
+STP0148_STAR_geneCount <- read.table(file = input_STP0148_STAR_geneCount_file,
+                                                  header = TRUE,
+                                                  sep = "\t") %>%
+  dplyr::select(., Geneid = N_unmapped, unstranded = X1521284, forward = X1521284.1, STP0148_STAR_geneCount = X1521284.2) %>%
+  as.data.frame() %>%
+  dplyr::select(., Geneid, STP0148_STAR_geneCount)
+
+# Filter out rows starting with "N"
+STP0148_STAR_geneCount <- STP0148_STAR_geneCount[!grepl("^N", STP0148_STAR_geneCount$Geneid), , drop = FALSE]
+
+# remove the genes from the PAR_Y (all have zero counts) they look like "ENSG00000185203.12_PAR_Y"
+STP0148_STAR_geneCount %<>% dplyr::filter(., !grepl("PAR_Y",Geneid))
+dim(STP0148_STAR_geneCount) # 58676 2
+# calculate the number of unique ensembl ids
+dim(STP0148_STAR_geneCount[!duplicated(STP0148_STAR_geneCount$Geneid), ]) # 58676 2
+# at this point there are no dupkicated ensembl ids
+
+```
+
+## STP0148_featureCounts_s2_20240424
+- run through featureCounts as an individial sample  
+
+```{r}
 
 # input counts; tidy up the column names; concat detail to the column name
-sixSample_dedup_featureCounts <- read.table(file = input_sixSample_dedup_featureCounts_file,
+STP0148_featureCounts_s2_20240424 <- read.table(file = input_STP0148_featureCounts_s2_20240424_file,
                                                   header = TRUE,
                                                   sep = "\t") %>%
   as.data.frame()
 # tidy up the column names
-colnames(sixSample_dedup_featureCounts) <- gsub("X.scratch.user.smit1924.preeclampsia_sex_chromosome_informed.deduplicated_clearBox.deduplicated_bams.|_marked_duplicates.bam",
+colnames(STP0148_featureCounts_s2_20240424) <- gsub("X.scratch.user.smit1924.20230608_male_grch38.aligned_data.|_T.*|_",
                                  "",
-                                 colnames(sixSample_dedup_featureCounts))
+                                 colnames(STP0148_featureCounts_s2_20240424))
 # concat detail to the column name
-sixSample_dedup_featureCounts %<>% rename_at(vars(starts_with("SC") | starts_with("ST")), ~paste0(., "_sixSample_dedup_featureCounts"))
+STP0148_featureCounts_s2_20240424 %<>% rename_at(vars(starts_with("SC") | starts_with("ST")), ~paste0(., "_STP0148_featureCounts_s2_20240424"))
 
 # remove the genes from the PAR_Y (all have zero counts) they look like "ENSG00000185203.12_PAR_Y"
-sixSample_dedup_featureCounts %<>% dplyr::filter(., !grepl("PAR_Y",Geneid))
-dim(sixSample_dedup_featureCounts) # 58676 7
+STP0148_featureCounts_s2_20240424 %<>% dplyr::filter(., !grepl("PAR_Y",Geneid))
+dim(STP0148_featureCounts_s2_20240424) # 58676 24
 # calculate the number of unique ensembl ids
-dim(sixSample_dedup_featureCounts[!duplicated(sixSample_dedup_featureCounts$Geneid), ]) # 58676 7
+dim(STP0148_featureCounts_s2_20240424[!duplicated(STP0148_featureCounts_s2_20240424$Geneid), ]) # 58676 24
 # at this point there are no dupkicated ensembl ids
 ```
 
@@ -124,30 +154,6 @@ STP0148_dedup_featureCounts_s2 %<>% dplyr::filter(., !grepl("PAR_Y",Geneid))
 dim(STP0148_dedup_featureCounts_s2) # 58676 2
 # calculate the number of unique ensembl ids
 dim(STP0148_dedup_featureCounts_s2[!duplicated(STP0148_dedup_featureCounts_s2$Geneid), ]) # 58676 2
-# at this point there are no dupkicated ensembl ids
-
-```
-
-## STP0148_STAR_geneCount 
-
-```{r}
-
-# import the count table
-STP0148_STAR_geneCount <- read.table(file = input_STP0148_STAR_geneCount_file,
-                                                  header = TRUE,
-                                                  sep = "\t") %>%
-  dplyr::select(., Geneid = N_unmapped, unstranded = X1521284, forward = X1521284.1, STP0148_STAR_geneCount = X1521284.2) %>%
-  as.data.frame() %>%
-  dplyr::select(., Geneid, STP0148_STAR_geneCount)
-
-# Filter out rows starting with "N"
-STP0148_STAR_geneCount <- STP0148_STAR_geneCount[!grepl("^N", STP0148_STAR_geneCount$Geneid), , drop = FALSE]
-
-# remove the genes from the PAR_Y (all have zero counts) they look like "ENSG00000185203.12_PAR_Y"
-STP0148_STAR_geneCount %<>% dplyr::filter(., !grepl("PAR_Y",Geneid))
-dim(STP0148_STAR_geneCount) # 58676 2
-# calculate the number of unique ensembl ids
-dim(STP0148_STAR_geneCount[!duplicated(STP0148_STAR_geneCount$Geneid), ]) # 58676 2
 # at this point there are no dupkicated ensembl ids
 
 ```
@@ -178,60 +184,127 @@ dim(sixSample_dedup_featureCounts_s2[!duplicated(sixSample_dedup_featureCounts_s
 
 ```
 
-## allMale_featureCounts_s2 
-
+## allMale_featureCounts_s2_20230608 
+- These are the original counts from 2023  
+- Run without the -Q or the --featureOverlaps flags  
 ```{r}
 
 # import the count table
-allMale_featureCounts_s2 <- read.table(file = input_allMale_featureCounts_s2_file,
+allMale_featureCounts_s2_20230608 <- read.table(file = input_allMale_featureCounts_s2_20230608_file,
                                                   header = TRUE,
                                                   sep = "\t") %>%
   as.data.frame()
 # tidy up the column names
-colnames(allMale_featureCounts_s2) <- gsub("X.scratch.user.smit1924.20230608_male_grch38.aligned_data.|_T.*|_",
+colnames(allMale_featureCounts_s2_20230608) <- gsub("X.scratch.user.smit1924.20230608_male_grch38.aligned_data.|_T.*|_",
                                  "",
-                                 colnames(allMale_featureCounts_s2))
+                                 colnames(allMale_featureCounts_s2_20230608))
 # concat detail to the column name
-allMale_featureCounts_s2 %<>% rename_at(vars(starts_with("SC") | starts_with("ST")), ~paste0(., "_allMale_featureCounts_s2"))
+allMale_featureCounts_s2_20230608 %<>% rename_at(vars(starts_with("SC") | starts_with("ST")), ~paste0(., "_allMale_featureCounts_s2_20230608"))
 
 # remove the genes from the PAR_Y (all have zero counts) they look like "ENSG00000185203.12_PAR_Y"
-allMale_featureCounts_s2 %<>% dplyr::filter(., !grepl("PAR_Y",Geneid))
-dim(allMale_featureCounts_s2) # 58676 24
+allMale_featureCounts_s2_20230608 %<>% dplyr::filter(., !grepl("PAR_Y",Geneid))
+dim(allMale_featureCounts_s2_20230608) # 58676 24
 # calculate the number of unique ensembl ids
-dim(allMale_featureCounts_s2[!duplicated(allMale_featureCounts_s2$Geneid), ]) # 58676 24
-# at this point there are no dupkicated ensembl ids
+dim(allMale_featureCounts_s2_20230608[!duplicated(allMale_featureCounts_s2_20230608$Geneid), ]) # 58676 24
+# at this point there are no duplicated ensembl ids
 
 ```
 
+## allMale_featureCounts_s2_20240424
+- Run with the -Q and --featureOverlaps flags set  
+
+```{r}
+
+# import the count table
+allMale_featureCounts_s2_20240424 <- read.table(file = input_allMale_featureCounts_s2_20240424_file,
+                                                  header = TRUE,
+                                                  sep = "\t") %>%
+  as.data.frame()
+# tidy up the column names
+colnames(allMale_featureCounts_s2_20240424) <- gsub("X.scratch.user.smit1924.20230608_male_grch38.aligned_data.|_T.*|_",
+                                 "",
+                                 colnames(allMale_featureCounts_s2_20240424))
+# concat detail to the column name
+allMale_featureCounts_s2_20240424 %<>% rename_at(vars(starts_with("SC") | starts_with("ST")), ~paste0(., "_allMale_featureCounts_s2_20240424"))
+
+# remove the genes from the PAR_Y (all have zero counts) they look like "ENSG00000185203.12_PAR_Y"
+allMale_featureCounts_s2_20240424 %<>% dplyr::filter(., !grepl("PAR_Y",Geneid))
+dim(allMale_featureCounts_s2_20240424) # 58676 24
+# calculate the number of unique ensembl ids
+dim(allMale_featureCounts_s2_20240424[!duplicated(allMale_featureCounts_s2_20240424$Geneid), ]) # 58676 24
+# at this point there are no duplicated ensembl ids
+
+```
+
+## allMale_featureCounts_s2_20240426
+- Run without the -Q10 and the --featureOverlaps flags  
+
+```{r}
+
+# import the count table
+allMale_featureCounts_s2_20240426 <- read.table(file = input_allMale_featureCounts_s2_20240426_file,
+                                                  header = TRUE,
+                                                  sep = "\t") %>%
+  as.data.frame()
+# tidy up the column names
+colnames(allMale_featureCounts_s2_20240426) <- gsub("X.scratch.user.smit1924.20230608_male_grch38.aligned_data.|_T.*|_",
+                                 "",
+                                 colnames(allMale_featureCounts_s2_20240426))
+# concat detail to the column name
+allMale_featureCounts_s2_20240426 %<>% rename_at(vars(starts_with("SC") | starts_with("ST")), ~paste0(., "_allMale_featureCounts_s2_20240426"))
+
+# remove the genes from the PAR_Y (all have zero counts) they look like "ENSG00000185203.12_PAR_Y"
+allMale_featureCounts_s2_20240426 %<>% dplyr::filter(., !grepl("PAR_Y",Geneid))
+dim(allMale_featureCounts_s2_20240426) # 58676 24
+# calculate the number of unique ensembl ids
+dim(allMale_featureCounts_s2_20240426[!duplicated(allMale_featureCounts_s2_20240426$Geneid), ]) # 58676 24
+# at this point there are no dupkicated ensembl ids
+
+```
 
 # combine all raw counts
 
 ```{r}
 # test to make sure the rownames are the same
-identical(sixSample_dedup_featureCounts$Geneid,
+identical(STP0148_STAR_geneCount$Geneid,
+          STP0148_featureCounts_s2_20240424$Geneid)
+
+identical(STP0148_STAR_geneCount$Geneid,
           STP0148_dedup_featureCounts_s2$Geneid)
-identical(sixSample_dedup_featureCounts$Geneid,
-          STP0148_STAR_geneCount$Geneid)
-identical(sixSample_dedup_featureCounts$Geneid,
+
+identical(STP0148_STAR_geneCount$Geneid,
+          allMale_featureCounts_s2_20230608$Geneid)
+
+identical(STP0148_STAR_geneCount$Geneid,
           sixSample_dedup_featureCounts_s2$Geneid)
-identical(sixSample_dedup_featureCounts$Geneid,
-          allMale_featureCounts_s2$Geneid)
+
+identical(STP0148_STAR_geneCount$Geneid,
+          allMale_featureCounts_s2_20230608$Geneid)
+
+identical(STP0148_STAR_geneCount$Geneid,
+          allMale_featureCounts_s2_20240424$Geneid)
+
+identical(STP0148_STAR_geneCount$Geneid,
+          allMale_featureCounts_s2_20240426$Geneid)
 # all Geneid are the same
 
 # List of tables to be joined
-tables <- list(sixSample_dedup_featureCounts,
+tables <- list(STP0148_STAR_geneCount,
+               STP0148_featureCounts_s2_20240424,
                STP0148_dedup_featureCounts_s2,
-               STP0148_STAR_geneCount,
                sixSample_dedup_featureCounts_s2,
-               allMale_featureCounts_s2)
+               allMale_featureCounts_s2_20230608,
+               allMale_featureCounts_s2_20240424,
+               allMale_featureCounts_s2_20240426)
+
 
 # Join tables iteratively
 combinedRawCounts <- Reduce(function(x, y) dplyr::left_join(x, y, by = "Geneid"), tables)
-dim(combinedRawCounts) # 58676 38
+dim(combinedRawCounts) # 58676 79
 
 # Remove rows with row sums equal to zero in every column
 combinedRawCounts <- combinedRawCounts[rowSums(combinedRawCounts[, -1]) != 0, ]
-dim(combinedRawCounts) # 42299 38
+dim(combinedRawCounts) # 40318 79
 
 ```
 
@@ -239,17 +312,20 @@ dim(combinedRawCounts) # 42299 38
 ```{r}
 
 rownames(combinedRawCounts) <- NULL # Resets numbers to start at one
-# t_combinedRawCounts <- data.frame(combinedRawCounts) %>% tibble::column_to_rownames("Geneid") %>%
-#   t()
+
 combinedRawCounts <- data.frame(combinedRawCounts) %>% tibble::column_to_rownames("Geneid")
 
 correlation <- cor(combinedRawCounts)
 
 # Create an interactive heatmap
-heatmap_plot <- heatmaply(correlation, 
-                          xlab = "Variables", ylab = "Variables",
-                          main = "Correlation Matrix Heatmap",
-                          width = 1000, height = 800)
+heatmaply(correlation,
+          row_text_angle = 0,
+          column_text_angle = 90,
+          xlab = "",
+          ylab = "",
+          main = "Correlation Matrix Heatmap",
+          width = 1000,
+          height = 1000)
 
 # Save the heatmap plot as an HTML file
 # saveWidget(heatmap_plot,
@@ -264,49 +340,56 @@ heatmap_plot <- heatmaply(correlation,
 
 ```
 
-
-# Subset out STP0148 from each table
+# Scatter plots of logged cpms
+## Log the counts
 
 ```{r}
-STP0148 <- dplyr::left_join(log2cpm_20230608 %>% dplyr::select(., Geneid, STP0148_20230608),
-                            log2cpm_20240418 %>% dplyr::select(., Geneid, STP0148_20240418),
-                            by = "Geneid") %>%
-  dplyr::left_join(., dedup_no_split_ensembl_log2cpm %>% dplyr::select(Geneid, STP0148_dedup),
-                   by = "Geneid")
 
+# log2Counts <- log2(combinedRawCounts + 1)
+# 
+# # save a copy of the tpm counts with only the hgnc gene symbol
+# log2Counts %>%
+#   tibble::rownames_to_column("ensembl") %>%
+#   write.table(file = output_combined_log2_counts_file,
+#               quote = FALSE,
+#               sep = "\t",
+#               col.names = TRUE,
+#               row.names = FALSE)
 
-ENSG00000183668_STP0148 <- STP0148[str_detect(STP0148$Geneid, "^ENSG00000183668"), ]
+# import the log2 table
+log2Counts <- read.table(file = output_combined_log2_counts_file,
+                                                  header = TRUE,
+                                                  sep = "\t") %>%
+  as.data.frame()
 
 ```
-
-# Scatter plots of logged cpms
 
 ```{r}
 # set the min and max axis values for the plots
 # Get column names of numeric columns
-numeric_cols <- sapply(STP0148, is.numeric)
+numeric_cols <- sapply(log2Counts, is.numeric)
 # Find the maximum value for each numeric column
-max_values <- sapply(STP0148[, numeric_cols],
+max_values <- sapply(log2Counts[, numeric_cols],
                      max,
                      na.rm = TRUE)
 # Find the overall maximum value
 overall_max <- round(max(max_values,
                          na.rm = TRUE), 0)
 # Find the minimum value for each numeric column
-min_values <- sapply(STP0148[, numeric_cols],
+min_values <- sapply(log2Counts[, numeric_cols],
                      min,
                      na.rm = TRUE)
 # Find the overall maximum value
 overall_min <- round(min(min_values,
                          na.rm = TRUE), 0)
 
-exp <- "STP0148_20240418_v_STP0148_dedup"
-png(filename = file.path(outdir, paste0(exp, "_compare_logCPMs.png")),
+exp <- "STP0148_allMale_featureCounts_s2_20230608_v_STP0148_allMale_featureCounts_s2_20240426"
+png(filename = file.path(outdir, paste0(exp, "_compare_log2.png")),
     width = 800, height = 800)
-STP0148 %>%
+log2Counts %>%
   ggplot() +
-  geom_point(aes(x = STP0148_20240418,
-                 y = STP0148_dedup)) +
+  geom_point(aes(x = STP0148_allMale_featureCounts_s2_20230608,
+                 y = STP0148_allMale_featureCounts_s2_20240426)) +
         # set x and y axis limits
       xlim(overall_min, overall_max) +
       ylim(overall_min, overall_max) +
@@ -315,11 +398,36 @@ STP0148 %>%
                   color = "red",
                   linetype = "dashed") +
         # update main and axis labels
-      labs(x = "STP0148_20240418 log2 cpm",
-           y = "STP0148_dedup log2 cpms",
+      labs(x = "STP0148_allMale_featureCounts_s2_20230608 log2 + 1",
+           y = "STP0148_allMale_featureCounts_s2_20240426 log2 + 1",
            title = exp)  +
   theme_bw()
 dev.off()
+
+
+```
+```{r}
+
+columnsList <- list("SCP3412_allMale_featureCounts_s2_20230608", "SCP3492_allMale_featureCounts_s2_20230608", "SCP3929_allMale_featureCounts_s2_20230608", "SCP3954_allMale_featureCounts_s2_20230608", "SCP3962_allMale_featureCounts_s2_20230608", "SCP4010_allMale_featureCounts_s2_20230608", "SCP4059_allMale_featureCounts_s2_20230608", "SCP4157_allMale_featureCounts_s2_20230608", "SCP4196_allMale_featureCounts_s2_20230608", "SCP4319_allMale_featureCounts_s2_20230608", "SCP4578_allMale_featureCounts_s2_20230608", "SCP4809_allMale_featureCounts_s2_20230608", "SCP4913_allMale_featureCounts_s2_20230608", "STP0105_allMale_featureCounts_s2_20230608", "STP0148_allMale_featureCounts_s2_20230608", "STP0378_allMale_featureCounts_s2_20230608", "STP0583_allMale_featureCounts_s2_20230608", "STP0596_allMale_featureCounts_s2_20230608", "STP0795_allMale_featureCounts_s2_20230608", "STP0932_allMale_featureCounts_s2_20230608", "STP0944_allMale_featureCounts_s2_20230608", "STP1002_allMale_featureCounts_s2_20230608", "STP1206_allMale_featureCounts_s2_20230608")
+
+# Loop through column pairs
+for(i in 1:length(columnsList)) {
+  for(j in 1:length(columnsList)) {
+    
+    # Don't plot a column against itself
+    if(i != j) {
+      
+      # Plot i against j
+      p <- ggplot(data = log2Counts,
+                  aes_string(x = columnsList[[i]],
+                             y = columnsList[[j]])) +
+        geom_point() 
+      
+      print(p)
+      
+    }
+  }
+}
 
 
 ```
