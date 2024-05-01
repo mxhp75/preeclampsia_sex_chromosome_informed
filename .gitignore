@@ -58,9 +58,9 @@ rsconnect/
 *.bam.bai
 
 # CibersortX files
-cibersortx/fractions_latest.sif
-cibersortx/data/GSE182381_reference_sample.txt
+*cibersortx/fractions_latest.sif
+*cibersortx/data/GSE182381_reference_sample.txt
 
-cibersortx_reduced_sigMatrix/fractions_latest.sif
-cibersortx_reduced_sigMatrix/data/GSE182381_reference_sample.txt
+*fractions_latest.sif
+*GSE182381_reference_sample.txt
 
