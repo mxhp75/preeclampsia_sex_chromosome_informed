@@ -41,6 +41,9 @@ library(pheatmap)
 # Parallel optimisation
 library(foreach)
 library(doParallel)
+# samtools
+library(Rsamtools)
+
 
 # set project directory
 projectDir <- "/home/smit1924/preeclampsia_sex_chromosome_informed"
@@ -84,6 +87,19 @@ dir.create(paste0(outdir, "/deDown"))
 options(digits=3)
 
 `%notin%` <- Negate(`%in%`)
+
+```
+
+### Index bam file
+```{r}
+
+# Path to your BAM file
+bam_file <- file.path(projectDir, "clearBoxRawData", "bamFiles", "STP0148_mark_dup.bam")
+
+
+
+# Index the BAM file
+indexBam(bam_file)
 
 ```
 
@@ -511,10 +527,6 @@ for (i in seq_along(plots)) {
       scale_color_gradient(name = paste("Cibersort SigMatrix (log2 ", col_name, ")", sep = ""),
                            low = "white",
                            high = "red") +
-      # update main and axis labels
-      labs(x = "log2 tpm + 0.01",
-           y = "Cibersortx Mixture Matrix",
-           title = samplename)  +
       theme_bw() +
       theme(legend.position = "bottom")
     
@@ -620,10 +632,6 @@ expected <- rnorm(length(subset$tpm), mean = mean_observed, sd = sd_observed)
 
 # Plot expected values in red
 points(qqnorm(expected, plot.it = FALSE), col = "red")
-
-
-
-
 
 ```
 

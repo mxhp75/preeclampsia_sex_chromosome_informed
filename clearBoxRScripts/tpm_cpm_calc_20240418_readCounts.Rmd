@@ -109,6 +109,10 @@ dim(rawCounts_male) #58686 24
 # calculate the number of unique ensembl ids
 dim(rawCounts_male[!duplicated(rawCounts_male$Geneid), ]) #58676 24
 # at this point there are no dupkicated ensembl ids
+
+ENSG00000186652_20240418 <- rawCounts_male[str_detect(rawCounts_male$Geneid, "^ENSG00000186652"), ]
+ENSG00000210082_20240418 <- rawCounts_male[str_detect(rawCounts_male$Geneid, "^ENSG00000210082"), ]
+ENSG00000183668_20240418 <- rawCounts_male[str_detect(rawCounts_male$Geneid, "^ENSG00000183668"), ]
 ```
 
 ### Female
@@ -144,7 +148,7 @@ rawCounts <- dplyr::left_join(rawCounts_male,
                               by = "Geneid")
 dim(rawCounts) # 58686 62
 
-rownames(rawCounts) <- NULL # Resets numbers to start at one after omitting first four rows loading data
+rownames(rawCounts) <- NULL # Resets numbers to start at one
 colnames(rawCounts)[1] <- "gene_id" # rename the gene column to match Nick's code
 
 ```
@@ -154,10 +158,10 @@ colnames(rawCounts)[1] <- "gene_id" # rename the gene column to match Nick's cod
 # 2. Process raw count data in edgeR again, as per melanieRawCountsProcessing_v2.0.3.rmd
 # Add gene length to expression data
 raw_data <- rawCounts %>%
-  dplyr::mutate(Length = exonic_gene_sizes$length[match(Geneid, exonic_gene_sizes$gene)])
+  dplyr::mutate(Length = exonic_gene_sizes$length[match(gene_id, exonic_gene_sizes$gene)])
 # move the ensemble ids into the rownames and check table diminsions
 raw_data <- raw_data %>% 
-  tibble::column_to_rownames("Geneid")
+  tibble::column_to_rownames("gene_id")
 head(raw_data)
 dim(raw_data) # 58676 62
 
@@ -173,13 +177,13 @@ head(y$counts) # Gene names are set as rownames
 y$samples$lib.size # 25840016 14146199  9271133 23206041 13993327  4960561 11548145  9827585 11107194 13036244 19704650 10137751 18870585 25998630 28517294 14346006 20252292 10373457 10308117 10562185  9780885 11881306 10633676 27939519 15108240 21264765 10803912 10363357 12391073  6540180  8510134 11019145 22264896  9005622  7363172 17951449 12148454 22558944 19120886  9762863 21420996 21407095 19016558  7325552  9408056 12983552 24634481 23349226 14705521 25946757 18464833 23957877 27043669 10515540 13759070 20307551 19362575 10604993  9093579 12845802 21051760
 
 
-# Identify genes expressed at > 1 cpm in at least one sample
-keep <- rowSums(cpm(y) > filterCPM) >= numSamples
-table(keep) # Keeping 13777 genes
-
-# Apply filter
-y <- y[keep, , keep.lib.sizes = FALSE]
-dim(y) # 13777  61
+# # Identify genes expressed at > 1 cpm in at least one sample
+# keep <- rowSums(cpm(y) > filterCPM) >= numSamples
+# table(keep) # Keeping 13777 genes
+# 
+# # Apply filter
+# y <- y[keep, , keep.lib.sizes = FALSE]
+# dim(y) # 13777  61
 y$samples$lib.size # 25731368 14109476  9235232 23113704 13947351  4943463 11521143  9768451 11076947 13008609 19636749 10113294 18825689 25941248 28421043 14305351 20173817 10339107 10284346 10530964  9755775 11856046 10607783 27873480 15031246 21207524 10776880 10319452 12355039  6499956  8476777 10981939 22206227  8962473  7334073 17868278 12119455 22494048 19076618  9731313 21349533 21351772 18966245  7296636  9389285 12948595 24578641 23298271 14630492 25892606 18422524 23885709 26963928 10481274 13720697 20251871 19318938 10580329  9060849 12813609 21010050
 
 # TMM normalisation 

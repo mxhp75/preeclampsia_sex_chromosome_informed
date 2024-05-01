@@ -27,7 +27,6 @@ projectDir <- "/home/smit1924/preeclampsia_sex_chromosome_informed"
 expt_name <- "melanie_v2_0_3"
 
 genome_gtf_infile <- file.path(projectDir, "clearBoxCleanData/gencode.v29.annotation.gtf")
-gencodev29_gff_inFile <- file.path(projectDir, "clearBoxCleanData/gencode.v29.chr_patch_hapl_scaff.annotation.gff3")
 input_counts_female <- file.path(projectDir, "clearBoxRawData/featureCounts_v2.0.3_female_readCounts.txt")
 input_counts_male <- file.path(projectDir, "clearBoxRawData/featureCounts_v2.0.3_male_readCounts.txt")
 input_metadata_file <- file.path(projectDir, "clearBoxRawData/cleanSampleMetadata.csv")
@@ -37,6 +36,8 @@ outdir <- file.path(projectDir, "clearBoxCleanData")
 # output_male_cibersort_file <- file.path(outdir, paste0(expt_name, "_bulkCountMatrix_male.txt"))
 output_all_cibersort_file <- file.path(outdir, "tpm_bulkCountMatrix_all.txt")
 output_all_cibersort_file_gene_symbol <- file.path(outdir, "tpm_bulkCountMatrix_all_gene_symbol.txt")
+
+output_20230608_readCounts_filelog2cpm_file <- file.path(outdir, "20230608_log2cpms_no_gene_names.txt")
 
 # dir.create(outdir)
 
@@ -108,12 +109,10 @@ colnames(rawCounts_female) <- gsub("X.scratch.user.smit1924.20230608_female_grch
                                  colnames(rawCounts_female))
 # remove the genes from the PAR_Y (all have zero counts)
 rawCounts_female %<>% dplyr::filter(., !grepl("PAR_Y",Geneid))
-# remove the number after the period
-#rawCounts_female %<>% tidyr::separate(., col = Geneid, into = c("ensembl", "right")) #%>%
- # dplyr::select(., -right) %>%
- # tibble::column_to_rownames("ensembl")
-
-dim(rawCounts_female)
+dim(rawCounts_female) #58676 39
+# calculate the number of unique ensembl ids
+dim(rawCounts_female[!duplicated(rawCounts_female$Geneid), ]) #58676 39
+# at this point there are no duplicated ensembl ids
 
 ```
 
@@ -132,12 +131,14 @@ colnames(rawCounts_male) <- gsub("X.scratch.user.smit1924.20230608_male_grch38.a
                                  colnames(rawCounts_male))
 # remove the genes from the PAR_Y (all have zero counts)
 rawCounts_male %<>% dplyr::filter(., !grepl("PAR_Y",Geneid))
-# remove the number after the period
-# rawCounts_male %<>% tidyr::separate(., col = Geneid, into = c("ensembl", "right")) %>%
-#   dplyr::select(., -right) %>%
-#   tibble::column_to_rownames("ensembl")
+dim(rawCounts_male) #58676 24
+# calculate the number of unique ensembl ids
+dim(rawCounts_male[!duplicated(rawCounts_male$Geneid), ]) #58676 24
+# at this point there are no duplicated ensembl ids
 
-dim(rawCounts_male)
+ENSG00000186652_20230608 <- rawCounts_male[str_detect(rawCounts_male$Geneid, "^ENSG00000186652"), ]
+ENSG00000210082_20230608 <- rawCounts_male[str_detect(rawCounts_male$Geneid, "^ENSG00000210082"), ]
+ENSG00000183668_20230608 <- rawCounts_male[str_detect(rawCounts_male$Geneid, "^ENSG00000183668"), ]
 
 ```
 
@@ -152,7 +153,7 @@ identical(rownames(rawCounts_male), rownames(rawCounts_female))
 rawCounts_melanie_v2.0.3 <- dplyr::left_join(rawCounts_male,
                                              rawCounts_female,
                                              by = "Geneid")
-dim(rawCounts_melanie_v2.0.3)
+dim(rawCounts_melanie_v2.0.3) # 58676 62
 
 rownames(rawCounts_melanie_v2.0.3) <- NULL # Resets numbers to start at one after omitting first four rows loading data
 colnames(rawCounts_melanie_v2.0.3)[1] <- "gene_id" # rename the gene column to match Nick's code
@@ -182,13 +183,13 @@ head(y$counts) # Gene names are set as rownames
 y$samples$lib.size # 28672359 15180417 10138344 25759561 15425026  5507928 12896174 10837351 12385640 14295205 21626993 11278639 20747792 28461227 31442737 15942814 22769037 12135572 11522629 11513311 10905097 13277754 11656794 31028631 16773925 23481555 11815919 11496632 13894031  7324003  9328523 12036392 24086651 10037391  8056703 19991087 13302511 24764993 21123282 1061741023868182 23565833 21228375  8322559 10481438 14577169 27111041 25782537 16716060 28683991 20543590 26769134 30312948 11817289 15148504 22441450 21472467 11815890  9975559 14182153 23677776
 
 
-# Identify genes expressed at > 1 cpm in at least one sample
-keep <- rowSums(cpm(y) > filterCPM) >= numSamples
-table(keep) # Keeping 13767 genes
-
-# Apply filter
-y <- y[keep, , keep.lib.sizes = FALSE]
-dim(y) # 13767    61
+# # Identify genes expressed at > 1 cpm in at least one sample
+# keep <- rowSums(cpm(y) > filterCPM) >= numSamples
+# table(keep) # Keeping 13767 genes
+# 
+# # Apply filter
+# y <- y[keep, , keep.lib.sizes = FALSE]
+# dim(y) # 13767    61
 y$samples$lib.size #  [1] 28560726 15136770 10100249 25663833 15375726  5488629 12864451 10770829 12351400 14263116 21554351 11249107 20697206 28394755 31340006 15899816 22691259 12095922 11495031 11479567 10878389 13248649 11628020 30953360 16692824 23417827 11785035 11450192 13853216  7278418  9293300 11994632 24021150  9991298  8026111 19902251 13268681 24694085 21073254 10583684 23790639 23498429 21172150  8290759 10459540 14537255 27048799 25726813 16639072 28621212 20497079 26692901 30228143 11780383 15106099 22380057 21424653 11787178  9939070 14147218 23631072
 
 # TMM normalisation 
@@ -203,6 +204,25 @@ rpkm <- rpkm(y)
 tpm <- t( t(rpkm) / colSums(rpkm) ) * 1e6
 # These TPM values now incorporate the TMM factors
 
+```
+
+## Generate and save a table of log2 cpms before adding the gene level information
+
+```{r}
+# generate the logged cpms
+log2cpms_no_gene_names_20230608 <- edgeR::cpm(y, log = TRUE)
+
+# save a copy of the logged cpms
+log2cpms_no_gene_names_20230608 %>%
+  as.data.frame() %>%
+  # move the rownames into a column
+  tibble::rownames_to_column("Geneid") %>%
+  # save log2 cpm count file
+  write.table(file = output_20230608_readCounts_filelog2cpm_file,
+              quote = FALSE,
+              sep = "\t",
+              col.names = TRUE,
+              row.names = FALSE)
 ```
 
 ## lets add the gene name information
