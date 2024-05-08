@@ -43,6 +43,9 @@ input_counts_deduplicated_file <- file.path(projectDir, "deduplicated_clearBox/r
 input_counts_female_file <- file.path(projectDir, "clearBoxRawData/featureCounts_v2.0.3_female_readCounts.txt")
 input_counts_male_file <- file.path(projectDir, "clearBoxRawData/featureCounts_v2.0.3_male_readCounts.txt")
 
+## TPM matrix from the full, pre-deduplicated counts (use the genes from this matrix to subset the deduplicated matrix)
+input_bulkCountMatrix_all_gene_symbol_file <- file.path(projectDir, "cibersortx_reduced_sigMatrix/data/bulkCountMatrix_all_gene_symbol.txt")
+
 ## Output TPM file
 output_tpm_12_sample_combined_bulkCountMatrix_file <- file.path(outdir, "tpm_12_sample_combined_bulkCountMatrix.txt")
 
@@ -51,10 +54,6 @@ dedup_samples <- c("STP0148", "SCP3954", "STP1206", "STP0932", "SCP4733", "STP05
 
 ## set max digits
 options(digits = 3)
-
-# Filtering criteria
-filterCPM <- 2
-namSamples <- 5
 ```
 
 # Import files
@@ -165,6 +164,15 @@ dim(rawCounts_male[!duplicated(rawCounts_male$Geneid), ]) #58676 24
 
 ```
 
+## tpm bulkCountMatrix_all_gene_symbol
+- This matrix will be used to subset the combined tpms to ensure we have the same gene set as previous cibersortx runs
+
+```{r import tpms - not deduplicated}
+# import the tpms table
+bulkCountMatrix_all_gene_symbol <- read.delim(file = input_bulkCountMatrix_all_gene_symbol_file) %>%
+  as.data.frame()
+```
+
 ## Combine counts
 
 ```{r}
@@ -184,9 +192,10 @@ combined_rawCounts <- dplyr::left_join(rawCounts_female,
   dplyr::full_join(., rawCounts_deduplicated,
                    by = "Geneid")
 dim(combined_rawCounts) # 58676 13
+
 # drop any rows that are zero in all samples
-combined_rawCounts <- combined_rawCounts[rowSums(combined_rawCounts[,-1])>0,]
-rownames(combined_rawCounts) <- NULL # Resets rownumbers
+# combined_rawCounts <- combined_rawCounts[rowSums(combined_rawCounts[,-1])>0,]
+# rownames(combined_rawCounts) <- NULL # Resets rownumbers
 ```
 
 ## Calculate TPMs
@@ -200,7 +209,7 @@ raw_data <- combined_rawCounts %>%
   tibble::column_to_rownames("Geneid")
 # check in on the dimensions
 head(raw_data)
-dim(raw_data) # 33831 13
+dim(raw_data) # 58676 13
 
 # establish the DGEList object
 y <- edgeR::DGEList(counts = raw_data %>% dplyr::select(-Length),
@@ -208,7 +217,7 @@ y <- edgeR::DGEList(counts = raw_data %>% dplyr::select(-Length),
 
 y
 y$genes # A Length column is present 
-dim(y) # 33831 12
+dim(y) # 58676 12
 
 head(y$counts) # Gene names are set as rownames
 y$samples$lib.size # 31442737 25759561 11656794 11513311 10617410 12135572 12821534  5711772 15733226  6530654  7074417  6624113
@@ -261,10 +270,15 @@ tpm_gene_id_symbol_chr_biotype <- data.frame(tpm) %>%
   dplyr::left_join(., gencode_v29_gene_id_symbol_chr_biotype, by = "ensembl_gene_id") %>%
   dplyr::select(colnames(gencode_v29_gene_id_symbol_chr_biotype), colnames(data.frame(tpm)))
 
-dim(tpm_gene_id_symbol_chr_biotype) # 33831 15
+dim(tpm_gene_id_symbol_chr_biotype) # 58676 15
+
+# Subset the combined counts to only contain genes in the pre-deduplicated bulkCountMatrix
+idx <- match(tpm_gene_id_symbol_chr_biotype$hgnc_symbol, 
+             bulkCountMatrix_all_gene_symbol$hgnc_symbol)
+subsetted_table <- tpm_gene_id_symbol_chr_biotype[!is.na(idx),] # 13778 15
 
 # save a copy of the tpm counts with only the hgnc gene symbol
-tpm_gene_id_symbol_chr_biotype %>%
+subsetted_table %>%
   # remove the ensembl gene id and the chromosome name
   dplyr::select(., -ensembl_gene_id, -seqnames) %>%
   # save TPM count file for CIBERSTORTx
