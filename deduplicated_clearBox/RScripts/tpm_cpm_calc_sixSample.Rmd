@@ -15,6 +15,7 @@ Here we take the raw counts generated in the clearBox analysys and compare them 
 Only the six samples we already have deduplicated counts for will be compared.  
 
 # Load Libraries
+
 ```{r}
 library(IRanges)
 library(GenomicFeatures)
@@ -27,6 +28,7 @@ library(dplyr)
 ```
 
 # Project directories and input/output files
+
 ```{r}
 # Set project directory
 projectDir <- "/home/smit1924/preeclampsia_sex_chromosome_informed"
@@ -39,17 +41,22 @@ input_genome_gtf_file <- file.path(projectDir, "clearBoxCleanData/gencode.v29.an
 input_genome_gff3_file <- file.path(projectDir, "clearBoxCleanData/gencode.v29.chr_patch_hapl_scaff.annotation.gff3")
 
 ## Raw count files
+## read counts generated from deduplicated bams (these were annotated in sex informed STAR)
 input_counts_deduplicated_file <- file.path(projectDir, "deduplicated_clearBox/readCounts/20240429_deduplicated_s2_readCounts.txt")
+## read counts generated from standard bams
 input_counts_female_file <- file.path(projectDir, "clearBoxRawData/featureCounts_v2.0.3_female_readCounts.txt")
 input_counts_male_file <- file.path(projectDir, "clearBoxRawData/featureCounts_v2.0.3_male_readCounts.txt")
 
-## TPM matrix from the full, pre-deduplicated counts (use the genes from this matrix to subset the deduplicated matrix)
-input_bulkCountMatrix_all_gene_symbol_file <- file.path(projectDir, "cibersortx_reduced_sigMatrix/data/bulkCountMatrix_all_gene_symbol.txt")
+## CPM matrix from the full, pre-deduplicated counts (use the genes from this matrix to subset the deduplicated matrix)
+## The counts were generated previously from the standard bam read counts and contain all female and male samples
+input_20230608_log2cpms_no_gene_names_file <- file.path(projectDir, "clearBoxCleanData/20230608_log2cpms_no_gene_names.txt")
 
 ## Output TPM file
+## This file will contain tpms for 6 standard and 6 deduplicated bams (paired)
 output_tpm_12_sample_combined_bulkCountMatrix_file <- file.path(outdir, "tpm_12_sample_combined_bulkCountMatrix.txt")
 
 ## deduplicated samplenames
+## These are the only samples that have been deduplicated up to now
 dedup_samples <- c("STP0148", "SCP3954", "STP1206", "STP0932", "SCP4733", "STP0596")
 
 ## set max digits
@@ -98,7 +105,7 @@ dim(exonic_gene_sizes[!duplicated(exonic_gene_sizes$gene), ]) #58721 2
 
 ```
 
-## Deduplicated count file
+## Import the deduplicated count file
 
 ```{r import gene counts - deduplicated}
 
@@ -122,7 +129,7 @@ dim(rawCounts_deduplicated[!duplicated(rawCounts_deduplicated$Geneid), ]) #58676
 
 ```
 
-## Female count file
+## Import the Female count file
 
 ```{r import gene counts - deduplicated}
 
@@ -143,7 +150,7 @@ dim(rawCounts_female[!duplicated(rawCounts_female$Geneid), ]) #58676 39
 
 ```
 
-## Male count file
+## Import the Male count file
 
 ```{r import gene counts - deduplicated}
 
@@ -164,13 +171,15 @@ dim(rawCounts_male[!duplicated(rawCounts_male$Geneid), ]) #58676 24
 
 ```
 
-## tpm bulkCountMatrix_all_gene_symbol
-- This matrix will be used to subset the combined tpms to ensure we have the same gene set as previous cibersortx runs
+## import input_20230608_log2cpms_no_gene_names_file
+- This matrix will be used to subset the combined tpms to ensure we have the same gene set as previous cibersortx runs  
+- Subset the tpms using the ensembl id with version number intact
 
 ```{r import tpms - not deduplicated}
 # import the tpms table
-bulkCountMatrix_all_gene_symbol <- read.delim(file = input_bulkCountMatrix_all_gene_symbol_file) %>%
+log2cpms_no_gene_names <- read.delim(file = input_20230608_log2cpms_no_gene_names_file) %>%
   as.data.frame()
+dim(log2cpms_no_gene_names) #13767 62
 ```
 
 ## Combine counts
@@ -186,19 +195,17 @@ identical(rownames(rawCounts_female),
 combined_rawCounts <- dplyr::left_join(rawCounts_female,
                                        rawCounts_male,
                                        by = "Geneid") %>%
-  # subset to only include the six samples
+  # subset to only include the six samples that pair with the deduplicated bams
   dplyr::select(., Geneid, dedup_samples) %>%
   # join the deduplicated counts
   dplyr::full_join(., rawCounts_deduplicated,
                    by = "Geneid")
 dim(combined_rawCounts) # 58676 13
 
-# drop any rows that are zero in all samples
-# combined_rawCounts <- combined_rawCounts[rowSums(combined_rawCounts[,-1])>0,]
-# rownames(combined_rawCounts) <- NULL # Resets rownumbers
 ```
 
 ## Calculate TPMs
+
 ```{r}
 
 # 2. Process raw count data in edgeR again, as per melanieRawCountsProcessing_v2.0.3.rmd
@@ -219,7 +226,7 @@ y
 y$genes # A Length column is present 
 dim(y) # 58676 12
 
-head(y$counts) # Gene names are set as rownames
+head(y$counts) # Gene names are set as rownames (still have the ENSG0000000000.0 versions)
 y$samples$lib.size # 31442737 25759561 11656794 11513311 10617410 12135572 12821534  5711772 15733226  6530654  7074417  6624113
 
 # TMM normalisation 
@@ -233,6 +240,11 @@ rpkm <- rpkm(y)
 # And TPM: https://www.biostars.org/p/388584/#394579
 tpm <- t( t(rpkm) / colSums(rpkm) ) * 1e6
 # These TPM values now incorporate the TMM factors
+
+# Subset the combined tpms to only contain genes in the pre-deduplicated bulkCountMatrix
+idx <- match(rownames(tpm),
+             log2cpms_no_gene_names$Geneid)
+subsetted_table <- tpm[!is.na(idx),] # 13767 15
 
 ```
 
@@ -265,20 +277,15 @@ gencode_v29_gene_id_symbol_chr_biotype <- gencode_v29_gene_id_symbol_chr_biotype
 
 ```{r}
 # join the counts with the gene info
-tpm_gene_id_symbol_chr_biotype <- data.frame(tpm) %>%
+tpm_gene_id_symbol_chr_biotype <- data.frame(subsetted_table) %>%
   tibble::rownames_to_column("ensembl_gene_id") %>%
   dplyr::left_join(., gencode_v29_gene_id_symbol_chr_biotype, by = "ensembl_gene_id") %>%
-  dplyr::select(colnames(gencode_v29_gene_id_symbol_chr_biotype), colnames(data.frame(tpm)))
+  dplyr::select(colnames(gencode_v29_gene_id_symbol_chr_biotype), colnames(data.frame(subsetted_table)))
 
-dim(tpm_gene_id_symbol_chr_biotype) # 58676 15
-
-# Subset the combined counts to only contain genes in the pre-deduplicated bulkCountMatrix
-idx <- match(tpm_gene_id_symbol_chr_biotype$hgnc_symbol, 
-             bulkCountMatrix_all_gene_symbol$hgnc_symbol)
-subsetted_table <- tpm_gene_id_symbol_chr_biotype[!is.na(idx),] # 13778 15
+dim(tpm_gene_id_symbol_chr_biotype) # 13767 15
 
 # save a copy of the tpm counts with only the hgnc gene symbol
-subsetted_table %>%
+tpm_gene_id_symbol_chr_biotype %>%
   # remove the ensembl gene id and the chromosome name
   dplyr::select(., -ensembl_gene_id, -seqnames) %>%
   # save TPM count file for CIBERSTORTx
