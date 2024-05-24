@@ -127,6 +127,7 @@ rawCounts_deduplicated %<>% rename_at(vars(starts_with("SC") | starts_with("ST")
 dim(rawCounts_deduplicated[!duplicated(rawCounts_deduplicated$Geneid), ]) #58676 7
 # at this point there are no duplicated ensembl ids
 
+
 ```
 
 ## Import the Female count file
