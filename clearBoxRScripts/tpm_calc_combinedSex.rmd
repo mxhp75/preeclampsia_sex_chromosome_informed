@@ -158,6 +158,16 @@ dim(rawCounts_melanie_v2.0.3) # 58676 62
 rownames(rawCounts_melanie_v2.0.3) <- NULL # Resets numbers to start at one after omitting first four rows loading data
 colnames(rawCounts_melanie_v2.0.3)[1] <- "gene_id" # rename the gene column to match Nick's code
 
+# save a copy of the tpm counts with only the hgnc gene symbol
+# rawCounts_melanie_v2.0.3 %>%
+#   # save raw count file for Tayla
+#   write.table(file = "../../../../media/sf_D_DRIVE/rawCounts_SCOPE_STOP.txt",
+#               quote = FALSE,
+#               sep = "\t",
+#               col.names = TRUE,
+#               row.names = FALSE)
+
+
 ```
 
 ```{r}
