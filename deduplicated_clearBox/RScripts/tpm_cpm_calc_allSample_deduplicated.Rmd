@@ -54,6 +54,9 @@ output_tpm_allSample_deduplicated_bulkCountMatrix_file <- file.path(outdir, "tpm
 ## This file will contain cpms for 6 standard and 6 deduplicated bams (paired)
 output_cpm_allSample_deduplicated_bulkCountMatrix_file <- file.path(outdir, "cpm_allSample_deduplicated_bulkCountMatrix.txt")
 
+## Output figures
+output_librarySize_file <- file.path(outdir, "allSample_deduplicated_librarySize.png")
+
 # set filtering criteria
 filterCPM <- 1
 numSamples <- 5
@@ -188,6 +191,7 @@ cpm %>%
 # Plot the raw library sizes
 
 ```{r}
+
 y$samples %>%
   tibble::rownames_to_column("samplename") %>%
   mutate(color = case_when(
@@ -202,7 +206,13 @@ y$samples %>%
   labs(y = "Library size (total number of mapped and quantified reads)",
        x = "Samplename") +
   scale_fill_identity() +
-  coord_flip()
+  coord_flip() +
+  ggtitle("Deduplicated Library Size")
+ggsave(filename = output_librarySize_file,
+       width = 7,
+       height = 7,
+       units = "in",
+       dpi = 150)
 
 
 temp <- y$samples %>%
