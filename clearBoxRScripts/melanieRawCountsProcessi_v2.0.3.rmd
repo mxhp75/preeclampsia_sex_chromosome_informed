@@ -37,10 +37,10 @@ library(pheatmap)
 library(ggpubr)
 
 # set project directory
-projectDir <- "/home/smit1924/sexInformedPreeclampsia"
+projectDir <- "/home/smit1924/preeclampsia_sex_chromosome_informed"
 
-input_counts_female <- file.path(projectDir, "rawData/test_v2.0.3_female_readCounts.txt")
-input_counts_male <- file.path(projectDir, "rawData/test_v2.0.3_male_readCounts.txt")
+input_counts_female <- file.path(projectDir, "clearBoxRawData/featureCounts_v2.0.3_female_readCounts.txt")
+input_counts_male <- file.path(projectDir, "clearBoxRawData/featureCounts_v2.0.3_male_readCounts.txt")
 outfile <- file.path(projectDir, "clearBoxRawData/rawCounts_melanie_v2.0.3.csv")
 
 ```
