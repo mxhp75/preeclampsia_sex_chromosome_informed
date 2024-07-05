@@ -41,7 +41,33 @@ projectDir <- "/home/smit1924/preeclampsia_sex_chromosome_informed"
 
 input_counts_female <- file.path(projectDir, "clearBoxRawData/featureCounts_v2.0.3_female_readCounts.txt")
 input_counts_male <- file.path(projectDir, "clearBoxRawData/featureCounts_v2.0.3_male_readCounts.txt")
+gene_info_file <- file.path(projectDir, "clearBoxRawData/gene_id_vs_symbol.csv")
 outfile <- file.path(projectDir, "clearBoxRawData/rawCounts_melanie_v2.0.3.csv")
+output_dgelist_61_file <- file.path(projectDir, "clearBoxRawData/filt_norm_dgelist_61.rds")
+output_mds_file <- file.path(projectDir, paste0("clearBoxCleanData/filt_norm_mds_61.png"))
+
+# set max digits
+options(digits=3)
+
+# set filtering criteria
+filterCPM <- 2
+numSamples <- 5
+```
+
+## Import metadata file
+
+```{r}
+## Metadata
+all_metadata <- read_csv("/media/sf_D_DRIVE/VM_Projects/dataFolder/PlacentaGroup_Sample_information.csv") %>%
+  dplyr::filter(., flowCell == "CDN0JANXX") %>%
+  dplyr::mutate(., sex_outcome = paste(Sex, Outcome, sep = "_"))
+
+## Gene ID versus GeneSymbol
+gene_info <- read_csv(file = gene_info_file)
+
+## Gene ID versus GeneSymbol
+gene_info <- read_csv(file = gene_info_file)
+gene_info <- gene_info[!duplicated(gene_info$ensembl_gene_id), ]
 
 ```
 
@@ -93,7 +119,7 @@ dim(rawCounts_male)
 
 ```
 
-## Combine counts data into a single file and save (.csv)
+## Combine counts data into a single file
 
 ```{r combine counts, echo=FALSE}
 
@@ -115,9 +141,113 @@ dim(rawCounts_melanie_v2.0.3)
 ```{r}
 
 # save a csv of the combined raw counts table
-write_csv(rawCounts_melanie_v2.0.3,
-          file = outfile,
-          col_names = TRUE)
+# write_csv(rawCounts_melanie_v2.0.3,
+#           file = outfile,
+#           col_names = TRUE)
+
+```
+
+# Plot the raw library sizes
+
+```{r}
+data.frame(colSums(rawCounts_melanie_v2.0.3[, -1])) %>%
+  rename(lib.size = colSums.rawCounts_melanie_v2.0.3....1..) %>%
+  tibble::rownames_to_column("samplename") %>%
+  mutate(color = case_when(
+    lib.size < 5000000 ~ "red",
+    lib.size >= 5000000 & lib.size < 10000000 ~ "blue",
+    lib.size >= 10000000 ~ "darkgreen"
+  )) %>%
+  ggplot(aes(x = reorder(samplename, -lib.size), y = lib.size, fill = color)) +
+  geom_bar(stat = "identity") +
+  geom_hline(yintercept = 5000000, linetype = "dashed", color = "red") +
+  geom_hline(yintercept = 10000000, linetype = "dashed", color = "darkgreen") +
+  labs(y = "Library size (total number of mapped and quantified reads)",
+       x = "Samplename") +
+  scale_fill_identity() +
+  coord_flip() +
+  ggtitle("Pre Deduplication Library Size")
+
+```
+
+# Establish DGElist object
+
+```{r}
+# put the ensembl gene ID's into rownames
+counts <- rawCounts_melanie_v2.0.3 %>%
+  tibble::column_to_rownames("Geneid")
+
+# Ensure the column names are in the same order as all_metadata$samplename
+counts <- counts[, all_metadata$samplename]
+
+# drop rows with zero in all columns
+counts <- counts[rowSums(counts[])>0,] %>%
+  tibble::rownames_to_column("ensembl_gene_id")
+
+# put the ensemble gene IDs into column 1
+counts <- dplyr::left_join(counts, gene_info, by = "ensembl_gene_id") %>%
+  dplyr::select(., ensembl_gene_id, hgnc_symbol, everything())
+dim(counts)
+
+# establish the DGEList
+dge_list_obj <- DGEList(counts = counts %>% tibble::column_to_rownames("ensembl_gene_id") %>% dplyr::select(., -hgnc_symbol),
+                           samples = all_metadata,
+                           group = all_metadata$group,
+                           genes = counts %>% dplyr::select(ensembl_gene_id, hgnc_symbol))
+
+```
+
+# Filter biological noise and plot
+
+```{r}
+
+# new df of unfiltered cpm for the reduced DGEList
+preFilterCPM <- cpm(dge_list_obj)
+
+# remove low expressed genes (filterCPM in numSamples PE)
+keep.exprs <- rowSums(preFilterCPM > filterCPM) >= numSamples
+
+# Perform the filtering step and recalculate the TMM normalisation factors for each library.
+dge_list_obj <- dge_list_obj[keep.exprs,,keep.lib.sizes = FALSE]
+
+dim(dge_list_obj)
+
+```
+
+# TMM normalisation
+
+```{r}
+# calculate normalisation factors and apply to the DGEList object
+dge_list_obj <- calcNormFactors(dge_list_obj,
+                           method = "TMM")
+
+# # set the new factor levels
+sex_outcome_levels <- c("F_Control", "M_Control", "F_PE", "M_PE")
+dge_list_obj$samples$sex_outcome <- factor(dge_list_obj$samples$sex_outcome, levels=sex_outcome_levels)
+
+## save the filtered and normalised DGEList object
+saveRDS(dge_list_obj, file = output_dgelist_61_file)
+```
+
+# Plot MDS
+
+```{r}
+# define colours for each sex_outcome group
+sex_outcome_levels <- levels(as.factor(dge_list_obj$samples$sex_outcome))
+colors <- rainbow(length(sex_outcome_levels))
+# create a colour vector that matches the rows in the DGElist object
+col_vector <- colors[as.numeric(as.factor(dge_list_obj$samples$sex_outcome))]
+
+# save as MDS plot as png
+# png(file = output_mds_file,
+#     width = 12,
+#     height = 9,
+#     units = "in",
+#     res = 150)
+# Create the MDS plot with customizations
+limma::plotMDS(dge_list_obj, col=col_vector, labels=dge_list_obj$samples$samplename, main="MDS Plot 61 samples")
+legend("topright", legend=sex_outcome_levels, col=colors, pch=20, xpd=TRUE, inset=c(-0.01, 0))
+# dev.off()
 
 ```
 
