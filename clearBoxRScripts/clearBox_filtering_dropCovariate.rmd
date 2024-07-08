@@ -205,7 +205,119 @@ limma::plotMDS(dge_list_obj, col=col_vector, labels=dge_list_obj$samples$samplen
 legend("topright", legend=sex_outcome_levels, col=colors, pch=20, xpd=TRUE, inset=c(-0.2, 0))
 # dev.off()
 ```
+# Sex-specific BCV
 
+```{r}
+# vector of only male sample names
+males <- dplyr::filter(dge_list_obj$samples, Sex == "M")[, "samplename"]
+# subset DGEList to contain only males
+y_male <- dge_list_obj[, males]
+# calculate and plot BCV for male samples only
+y_male <- estimateCommonDisp(y_male,
+                             verbose = TRUE)
+y_male <- estimateTrendedDisp(y_male)
+y_male <- estimateTagwiseDisp(y_male)
+
+# Extract gene-wise BCV values
+gene_wise_bcv_male <- sqrt(y_male$tagwise.dispersion)
+
+# Create a data frame with gene names and BCV values
+bcv_table_male <- data.frame(
+  Gene = rownames(y_male),
+  BCV = gene_wise_bcv_male,
+  AveExpr = y_male$AveLogCPM
+)
+
+# plot the BCVs
+plotBCV(y_male,
+        xlab = "Average log CPM",
+        ylab = "Biological coefficient of variation - male",
+        pch = 16,
+        cex = 0.2,
+        col.common = "red",
+        col.trend = "blue",
+        col.tagwise = "black")
+
+# vector of only female sample names
+females <- dplyr::filter(dge_list_obj$samples, Sex == "F")[, "samplename"]
+# subset DGEList to contain only females
+y_female <- dge_list_obj[, females]
+# calculate and plot BCV for female samples only
+y_female <- estimateCommonDisp(y_female,
+                               verbose = TRUE)
+y_female <- estimateTrendedDisp(y_female)
+y_female <- estimateTagwiseDisp(y_female)
+# Extract gene-wise BCV values
+gene_wise_bcv_female <- sqrt(y_female$tagwise.dispersion)
+# Create a data frame with gene names and BCV values
+bcv_table_female <- data.frame(
+  Gene = rownames(y_female),
+  BCV = gene_wise_bcv_female,
+  AveExpr = y_female$AveLogCPM
+)
+plotBCV(y_female,
+        xlab = "Average log CPM",
+        ylab = "Biological coefficient of variation - female",
+        pch = 16,
+        cex = 0.2,
+        col.common = "red",
+        col.trend = "blue",
+        col.tagwise = "black")
+
+plot(bcv_table_male$BCV, bcv_table_female$BCV)
+
+# Density plot of the BCVs
+# Add a column to each data frame to indicate the sex
+bcv_table_male <- bcv_table_male %>%
+  mutate(sex = "male")
+
+bcv_table_female <- bcv_table_female %>%
+  mutate(sex = "female")
+
+# Combine the data frames
+bcv_combined <- bind_rows(bcv_table_male, bcv_table_female)
+
+# Create the density plot
+ggplot(bcv_combined, aes(x = BCV,
+                         fill = sex,
+                         colour = sex)) +
+  geom_density(alpha = 0.5) +
+  labs(title = "Density Plot of BCV by Fetal Sex",
+       x = "BCV",
+       y = "Density") +
+  theme_minimal()
+
+
+```
+
+# Estimate BCV (all samples together)
+```{r}
+dge_list_obj <- estimateCommonDisp(dge_list_obj,
+                                   verbose=TRUE)
+dge_list_obj <- estimateTrendedDisp(dge_list_obj)
+dge_list_obj <- estimateTagwiseDisp(dge_list_obj)
+# plot the BCV vs log2CPM
+plotBCV(dge_list_obj)
+
+# Extract gene-wise BCV values
+gene_wise_bcv <- sqrt(dge_list_obj$tagwise.dispersion)
+
+# Create a data frame with gene names and BCV values
+bcv_table <- data.frame(
+  Gene = rownames(dge_list_obj),
+  BCV = gene_wise_bcv,
+  AveExpr = dge_list_obj$AveLogCPM
+)
+
+# Sort the table by BCV (descending order)
+bcv_table_sorted <- bcv_table[order(-bcv_table$BCV), ]
+
+# View the top rows of the table
+head(bcv_table_sorted)
+
+# save the table to a CSV file:
+# write.csv(bcv_table_sorted, file = "gene_wise_bcv_results.csv", row.names = FALSE)
+```
 
 # Calculate log2CPM and save table as .csv
 
@@ -216,7 +328,8 @@ log2CPM <- edgeR::cpm(dge_list_obj, log = TRUE)
 #   as.data.frame() %>%
 #   tibble::rownames_to_column("ensembl") %>%
 #   write_csv(., file = output_log2CPM_file,
-#            col_names = TRUE)
+#            col_names = TBCVBCVBCVBCVffBCVgggggggggg
+
 
 ```
 
