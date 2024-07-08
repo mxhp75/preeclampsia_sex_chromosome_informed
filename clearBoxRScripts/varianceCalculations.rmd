@@ -24,19 +24,23 @@ library(ggplot2)
 library(ggrepel)
 
 # set project directory
-projectDir <- "/home/smit1924/sexInformedPreeclampsia"
+projectDir <- "/home/smit1924/preeclampsia_sex_chromosome_informed"
 # projectDir <- "/Users/pillmaka/Desktop/Melanie/drive-download"
 
 expt_name <- 'noCovariate'
 
+outdir <- file.path(projectDir, paste0(expt_name, "_output"))
+
 # input files
 counts_log2CPM_file <- file.path(projectDir, "noCovariate_output/noCovariatelog2CPM.csv")
+
+
 
 gene_info_file <- file.path(projectDir, "clearBoxRawData/gene_id_vs_symbol.csv")
 metadata_file <- file.path(projectDir, "clearBoxRawData/cleanSampleMetadata.csv")
 male_DE_file <- file.path(outdir, paste0(expt_name, "filtered_DE.csv"))
 
-outdir <- file.path(projectDir, paste0(expt_name, "_output"))
+
 
 dir.create(outdir)
 
@@ -104,7 +108,7 @@ varianceCalcs %>%
   geom_point() +
     # add a 45 degree line (x=y)
   geom_abline(intercept = 0, slope = 1, size = 0.5) +
-    # set the x and y-axis limits
+    # set the x and y-axis limits ( note that this cuts the Y-chromosome genes which have extreme low variance in females)
   scale_x_continuous(limits = c(-7.6, 4.2)) +
   scale_y_continuous(limits = c(-7.6, 4.2))
 
@@ -132,12 +136,12 @@ varianceScatter <- varianceCalcs %>%
                   xlim = c(0, 9),
                   max.overlaps = Inf,
                   show.legend = FALSE)
-ggsave(plot = varianceScatter,
-       filename = file.path(projectDir, "plots/geneWiseVariance.png"),
-       units = "in",
-       width = 12,
-       height = 12,
-       dpi = 150)
+# ggsave(plot = varianceScatter,
+#        filename = file.path(projectDir, "plots/geneWiseVariance.png"),
+#        units = "in",
+#        width = 12,
+#        height = 12,
+#        dpi = 150)
 
 ## variance plot with DE genes highlighted
 varianceScatter_de <- varianceCalcs %>%
@@ -157,11 +161,11 @@ varianceScatter_de <- varianceCalcs %>%
                   xlim = c(0, 17.5),
                   max.overlaps = Inf,
                   show.legend = FALSE)
-ggsave(plot = varianceScatter_de,
-       filename = file.path(projectDir, "plots/geneWiseVariance_de.png"),
-       units = "in",
-       width = 12,
-       height = 12,
-       dpi = 150)
+# ggsave(plot = varianceScatter_de,
+#        filename = file.path(projectDir, "plots/geneWiseVariance_de.png"),
+#        units = "in",
+#        width = 12,
+#        height = 12,
+#        dpi = 150)
 
 ```
