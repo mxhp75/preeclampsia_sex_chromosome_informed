@@ -43,6 +43,8 @@ output_spreadsheet_file <- file.path(outdir, paste0(expt_name, "filtered_DE.csv"
 output_pValue_file <- file.path(outdir, paste0(expt_name, "pValue_DE.csv"))
 output_log2CPM_file <- file.path(outdir, paste0(expt_name, "log2CPM.csv"))
 output_dgelist_58_file <- file.path(projectDir, "clearBoxRawData/filt_norm_dgelist_58.rds")
+output_gene_wise_bcv_results_male_file <- file.path(projectDir, "clearBoxCleanData/pre_dedup_gene_wise_bcv_results_male.csv")
+output_gene_wise_bcv_results_female_file <- file.path(projectDir, "clearBoxCleanData/pre_dedup_gene_wise_bcv_results_female.csv")
 
 
 output_descriptives_file <- file.path(outdir, paste0(expt_name, "_descriptives.txt"))
@@ -228,6 +230,10 @@ bcv_table_male <- data.frame(
   AveExpr = y_male$AveLogCPM
 )
 
+# save the table to a CSV file:
+write.csv(bcv_table_male, file = output_gene_wise_bcv_results_male_file,
+row.names = FALSE)
+
 # plot the BCVs
 plotBCV(y_male,
         xlab = "Average log CPM",
@@ -255,6 +261,11 @@ bcv_table_female <- data.frame(
   BCV = gene_wise_bcv_female,
   AveExpr = y_female$AveLogCPM
 )
+
+# save the table to a CSV file:
+write.csv(bcv_table_female, file = output_gene_wise_bcv_results_female_file,
+row.names = FALSE)
+
 plotBCV(y_female,
         xlab = "Average log CPM",
         ylab = "Biological coefficient of variation - female",
