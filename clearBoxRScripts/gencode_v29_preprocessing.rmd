@@ -1,0 +1,83 @@
+---
+title: "gencodev32"
+author: "Melanie Smith"
+date: "21 August 2023"
+output: html_document
+---
+
+# Load required libraries
+
+```{r load Libraries}
+
+library(plyr)
+library(reshape2)
+library(dplyr)
+library(stringr)
+library(magrittr)
+library(readr)
+library(rtracklayer)
+
+# set project directory
+projectDir <- "/home/smit1924/preeclampsia_sex_chromosome_informed"
+
+# define input files
+gencodev29_gff_inFile <- file.path(projectDir, "clearBoxCleanData/gencode.v29.chr_patch_hapl_scaff.annotation.gff3")
+
+# define output files
+outfile <- file.path(projectDir, "clearBoxCleanData/gencode_v29_gene_id_symbol_chr_biotype.csv")
+
+```
+
+# Import gencode V32 gff3 file
+
+```{r}
+
+# import the gencodev32_gff_inFile file
+all_gencode_v29 <- rtracklayer::import(gencodev29_gff_inFile)
+gene_data <- data.frame(ensembl_gene_id = all_gencode_v29@elementMetadata$gene_id,
+                        hgnc_symbol = all_gencode_v29@elementMetadata$gene_name,
+                        seqnames = all_gencode_v29@seqnames,
+                        gene_type = all_gencode_v29@elementMetadata$gene_type)
+# we're left with multiple identical rows - lets just keep one each
+gencode_v29_gene_id_symbol_chr_biotype <- gene_data %>% 
+  distinct(, .keep_all = TRUE)
+#Drop ones without a gene symbol - just for simplicity.
+# first add NA to any missing data
+gencode_v29_gene_id_symbol_chr_biotype[gencode_v29_gene_id_symbol_chr_biotype == ""] <- NA
+# then drop anything with an NA
+gencode_v29_gene_id_symbol_chr_biotype <- gencode_v29_gene_id_symbol_chr_biotype %>%
+  tidyr::drop_na()
+# which genes have multiple ensembl IDs
+gencode_v29_gene_id_symbol_chr_biotype[duplicated(gencode_v29_gene_id_symbol_chr_biotype$hgnc_symbol), ] 
+#There are genes with multiple gene IDs
+#Just pick one for each gene based on the earliest ensembl ID
+gencode_v29_gene_id_symbol_chr_biotype <- gencode_v29_gene_id_symbol_chr_biotype %>%
+  group_by(hgnc_symbol) %>%
+  arrange(ensembl_gene_id) %>%
+  filter(row_number()==1) %>%
+# make a copy of the ensemble with period
+# split the ensemble column to remove the period and number
+  tidyr::separate(., col = ensembl_gene_id, into = c("ensembl", "right"), remove = FALSE) %>%
+   dplyr::select(., -right)
+
+```
+
+## Save a clean copy of the gene ID vs gene Symbol file (.csv)
+
+```{r}
+
+# save a csv of the combined raw counts table
+readr::write_csv(data.frame(gencode_v29_gene_id_symbol_chr_biotype),
+          file = outfile,
+          col_names = TRUE)
+
+```
+
+## Session information
+
+```{r session info}
+
+sessionInfo()
+
+```
+
