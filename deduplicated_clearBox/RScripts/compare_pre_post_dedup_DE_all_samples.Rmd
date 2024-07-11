@@ -1,0 +1,143 @@
+---
+title: "compare_pre_post_dedup_DE"
+author: "Melanie Smith"
+date: "10 July 2024"
+output: html_document
+---
+
+# Load required libraries
+```{r load Libraries}
+library(plyr)
+library(reshape2)
+library(dplyr)
+library(stringr)
+library(edgeR)
+library(readxl)
+library(readr)
+library(magrittr)
+library(tibble)
+library(ggplot2)
+library(ggbeeswarm)
+library(ggrepel)
+library(pheatmap)
+
+# set project directory
+projectDir <- "/home/smit1924/preeclampsia_sex_chromosome_informed"
+
+# Input files
+input_male_dedup_allTable_file <- file.path(projectDir, "deduplicated_clearBox/output/allTable_male.csv")
+input_female_dedup_allTable_file <- file.path(projectDir, "deduplicated_clearBox/output/allTable_female.csv")
+
+input_male_prededup_allTable_file <- file.path(projectDir, "noCovariate_output/allTable_male.csv")
+input_female_prededup_allTable_file <- file.path(projectDir, "noCovariate_output/allTable_female.csv")
+
+outdir <- file.path(projectDir, "deduplicated_clearBox/output")
+
+# save figures
+output_scatterplot_logFC_male_file <- file.path(projectDir, "deduplicated_clearBox/output/scatterplot_logFC_male.png")
+output_scatterplot_logFC_female_file <- file.path(projectDir, "deduplicated_clearBox/output/scatterplot_logFC_female.png")
+
+output_scatterplot_FDR_male_file <- file.path(projectDir, "deduplicated_clearBox/output/scatterplot_FDR_male.png")
+output_scatterplot_FDR_female_file <- file.path(projectDir, "deduplicated_clearBox/output/scatterplot_FDR_female.png")
+
+
+dir.create(outdir)
+
+# set max digits
+options(digits=3)
+
+```
+
+# import allTables
+
+```{r}
+male_dedup_allTable <- read_csv(input_male_dedup_allTable_file)
+female_dedup_allTable <- read_csv(input_male_dedup_allTable_file)
+
+male_prededup_allTable <- read_csv(input_male_prededup_allTable_file)
+female_prededup_allTable <- read_csv(input_female_prededup_allTable_file)
+
+```
+
+# Plot logFC
+# Male Comparison
+```{r}
+
+# Join the tables and create a new column for color
+plot_data <- dplyr::left_join(
+  dplyr::select(male_prededup_allTable, ensembl = ensembl_gene_id, everything()), 
+  male_dedup_allTable, 
+  by = "ensembl"
+) %>%
+  mutate(color = case_when(
+    adj.P.Val.x < 0.05 & logFC.x > 0 ~ "green",
+    adj.P.Val.x < 0.05 & logFC.x < 0 ~ "red",
+    TRUE ~ "black"
+  ))
+
+# Plot with ggplot2
+ggplot(plot_data, aes(x = logFC.x, y = logFC.y)) +
+  # Plot all points in black first
+  geom_point(data = plot_data %>% filter(color == "black"), aes(color = color)) +
+  # Plot the green and red points on top
+  geom_point(data = plot_data %>% filter(color != "black"), aes(color = color)) +
+  scale_color_manual(values = c("black" = "black", "green" = "green", "red" = "red"),
+                     labels = c("black" = "Non-significant", 
+                                "green" = "Upregulated (adj.P.Val < 0.05)",
+                                "red" = "Downregulated (adj.P.Val < 0.05)"),
+                     guide = "legend") +
+  theme_bw() +
+  labs(title = "Male Comparison",
+       x = "logFC Pre-Deduplication",
+       y = "logFC Post-Deduplication",
+       color = "Significance") +
+  theme(legend.position = "bottom")
+ggsave(filename = output_scatterplot_logFC_male_file,
+       width = 8,
+       height = 8,
+       units = "in",
+       dpi = 150)
+
+```
+
+# Female Comparison
+```{r}
+
+# Join the tables and create a new column for color
+plot_data <- dplyr::left_join(
+  dplyr::select(female_prededup_allTable, ensembl = ensembl_gene_id, everything()), 
+  female_dedup_allTable, 
+  by = "ensembl"
+) %>%
+  mutate(colour = case_when(
+    adj.P.Val.x < 0.05 & logFC.x > 0 ~ "green",
+    adj.P.Val.x < 0.05 & logFC.x < 0 ~ "red",
+    TRUE ~ "black"
+  ))
+
+# Plot with ggplot2
+ggplot(plot_data, aes(x = logFC.x, y = logFC.y)) +
+  # Plot all points in black first
+  geom_point(data = plot_data %>% filter(colour == "black"), aes(color = colour)) +
+  # Plot the green and red points on top
+  geom_point(data = plot_data %>% filter(colour != "black"), aes(color = colour)) +
+  scale_color_manual(values = c("black" = "black", "green" = "green", "red" = "red"),
+                     labels = c("black" = "Non-significant", 
+                                "green" = "Upregulated (adj.P.Val < 0.05)",
+                                "red" = "Downregulated (adj.P.Val < 0.05)"),
+                     guide = "legend") +
+  theme_bw() +
+  labs(title = "Female Comparison",
+       x = "logFC Pre-Deduplication",
+       y = "logFC Post-Deduplication",
+       color = "Significance") +
+  theme(legend.position = "bottom")
+ggsave(filename = output_scatterplot_logFC_female_file,
+       width = 8,
+       height = 8,
+       units = "in",
+       dpi = 150)
+
+```
+
+
