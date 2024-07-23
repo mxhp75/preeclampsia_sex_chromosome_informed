@@ -21,14 +21,14 @@ library(ggrepel)
 library(pheatmap)
 
 # set project directory
-projectDir <- "/home/smit1924/sexInformedPreeclampsia"
+projectDir <- "/home/smit1924/preeclampsia_sex_chromosome_informed"
 # projectDir <- "/Users/pillmaka/Desktop/Melanie/drive-download"
 
 expt_name <- 'female_noCovariate'
 
 counts_geneID_file <- file.path(projectDir, "clearBoxRawData/rawCounts_melanie_v2.0.3.csv")
 
-gene_info_file <- file.path(projectDir, "clearBoxRawData/gene_id_vs_symbol.csv")
+gene_info_file <- file.path(projectDir, "clearBoxCleanData/gencode_v29_gene_id_symbol_chr_biotype.csv")
 metadata_file <- file.path(projectDir, "clearBoxRawData/cleanSampleMetadata.csv")
 
 outdir <- file.path(projectDir, paste0(expt_name, "_output"))
@@ -55,9 +55,6 @@ metadata <- read_csv(file = metadata_file)
 
 ## Gene ID versus GeneSymbol
 gene_info <- read_csv(file = gene_info_file)
-
-## Gene ID versus GeneSymbol
-gene_info <- read_csv(file = gene_info_file)
 gene_info <- gene_info[!duplicated(gene_info$ensembl_gene_id), ]
 ```
 
@@ -76,16 +73,19 @@ counts <- female_counts %>%
 counts <- counts[, female_metadata$samplename]
 # drop rows with zero in all columns
 counts <- counts[rowSums(counts[])>0,] %>%
-  tibble::rownames_to_column("ensembl_gene_id")
+  tibble::rownames_to_column("ensembl")
+dim(counts)
 # put the ensemble gene IDs into column 1
-counts <- dplyr::left_join(counts, gene_info, by = "ensembl_gene_id") %>%
+counts <- dplyr::left_join(counts, gene_info, by = "ensembl") %>%
   dplyr::select(., ensembl_gene_id, hgnc_symbol, everything())
 dim(counts)
+
 # establish the DGEList
-dge_list_obj <- DGEList(counts = counts %>% tibble::column_to_rownames("ensembl_gene_id") %>% dplyr::select(., -hgnc_symbol),
+dge_list_obj <- DGEList(counts = counts %>% tibble::column_to_rownames("ensembl") %>%
+                          dplyr::select(., -ensembl_gene_id, -hgnc_symbol, -seqnames, -gene_type),
                            samples = female_metadata,
                            group = female_metadata$group,
-                           genes = counts %>% dplyr::select(ensembl_gene_id, hgnc_symbol))
+                           genes = counts %>% dplyr::select(ensembl, ensembl_gene_id, hgnc_symbol, seqnames, gene_type))
 
 ```
 
@@ -179,7 +179,7 @@ fit_PE <- lmFit(voom_PE, design_PE)
 
 ```{r}
 # set the contrasts - this makes it easier to "see" what we're testing
-contrast_PE <- makeContrasts(female_PE = F_PE-F_Control,
+contrast_PE <- makeContrasts(female_PE = PE-Control,
                                  levels = design_PE)
 contrast_PE
 
@@ -198,7 +198,12 @@ summary(decideTests(contrast_fit_PE,
 
 # all DE results for the female_PE comparison
 allTable_female_PE <- topTable(contrast_fit_PE,
-                             coef = 1,
+                             coef = "female_PE",
                              n = Inf,
                              sort = "p")
+
+# create output files and save
+write_csv(allTable_female_PE,
+          file="/home/smit1924/preeclampsia_sex_chromosome_informed/noCovariate_output/allTable_female_only_PE.csv")
+
 ```
