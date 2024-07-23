@@ -1,7 +1,7 @@
 ---
-title: "clearBoxDE"
+title: "clearBoxDE - post deduplication"
 author: "Melanie Smith"
-date: "11 July 2023"
+date: "8 July 2024"
 output: html_document
 ---
 
@@ -25,29 +25,22 @@ library(pheatmap)
 projectDir <- "/home/smit1924/preeclampsia_sex_chromosome_informed"
 # projectDir <- "/Users/pillmaka/Desktop/Melanie/drive-download"
 
-expt_name <- 'noCovariate'
+counts_geneID_file <- file.path(projectDir, "deduplicated_clearBox/readCounts/deduplicated_s2_readCounts.txt")
 
-counts_geneID_file <- file.path(projectDir, "clearBoxRawData/rawCounts_melanie_v2.0.3.csv")
-
-gene_info_file <- file.path(projectDir, "clearBoxRawData/gene_id_vs_symbol.csv")
+gene_info_file <- file.path(projectDir, "clearBoxCleanData/gencode_v29_gene_id_symbol_chr_biotype.csv")
 metadata_file <- file.path(projectDir, "clearBoxRawData/cleanSampleMetadata.csv")
 
-# subsetGeneList_file <- file.path(projectDir, "clearBoxRawData/subsetGeneList.csv")
-outDesignMatrix_file <- file.path(projectDir, paste0("clearBoxRawData/", expt_name, "_design.csv"))
+outdir <- file.path(projectDir, "deduplicated_clearBox/output")
+output_spreadsheet_file <- file.path(outdir, "filtered_DE.csv")
+output_pValue_file <- file.path(outdir, "pValue_DE.csv")
+output_log2CPM_file <- file.path(outdir, "log2CPM.csv")
+output_dgelist_58_file <- file.path(projectDir, "deduplicated_clearBox/output/filt_norm_dgelist_58.rds")
+output_gene_wise_bcv_results_male_file <- file.path(projectDir, "deduplicated_clearBox/output/dedup_gene_wise_bcv_results_male.csv")
+output_gene_wise_bcv_results_female_file <- file.path(projectDir, "deduplicated_clearBox/output/dedup_gene_wise_bcv_results_female.csv")
 
-outdir <- file.path(projectDir, paste0(expt_name, "_output"))
-output_spreadsheet_file <- file.path(outdir, paste0(expt_name, "filtered_DE.csv"))
-output_pValue_file <- file.path(outdir, paste0(expt_name, "pValue_DE.csv"))
-output_log2CPM_file <- file.path(outdir, paste0(expt_name, "log2CPM.csv"))
-output_dgelist_58_file <- file.path(projectDir, "clearBoxRawData/filt_norm_dgelist_58.rds")
-output_gene_wise_bcv_results_male_file <- file.path(projectDir, "clearBoxCleanData/pre_dedup_gene_wise_bcv_results_male.csv")
-output_gene_wise_bcv_results_female_file <- file.path(projectDir, "clearBoxCleanData/pre_dedup_gene_wise_bcv_results_female.csv")
-
-
-output_descriptives_file <- file.path(outdir, paste0(expt_name, "_descriptives.txt"))
 # save figures
-output_librarySize_file <- file.path(outdir, paste0(expt_name, "_librarySizePlot.png"))
-output_mds_file <- file.path(outdir, paste0(expt_name, "_58_mds.png"))
+output_librarySize_file <- file.path(projectDir, "deduplicated_clearBox/output/deduplicated_librarySizePlot.png")
+output_mds_file <- file.path(projectDir, "deduplicated_clearBox/output/deduplicated_58_mds.png")
 
 dir.create(outdir)
 
@@ -61,10 +54,21 @@ numSamples <- 5
 ```
 
 # Import all input data tables
+## Raw Counts
 ```{r}
-## Count data
-# import the count file for DE
-rawCounts <- read_csv(file = counts_geneID_file)
+# import the counts table
+# counts are annotated to GRCh38
+rawCounts_deduplicated <- read.delim(file = counts_geneID_file) %>%
+  as.data.frame()
+# tidy up the column names
+colnames(rawCounts_deduplicated) <- gsub("X.media.sf_D_DRIVE.VM_Projects.20240619_deduplicateBams.deduplicated_data.|_marked_duplicates.bam|_T.*|_",
+                                 "",
+                                 colnames(rawCounts_deduplicated))
+
+```
+
+## Gene information and sample metadata
+```{r}
 
 ## Metadata
 metadata <- read_csv(file = metadata_file)
@@ -76,33 +80,13 @@ gene_info <- read_csv(file = gene_info_file)
 gene_info <- read_csv(file = gene_info_file)
 gene_info <- gene_info[!duplicated(gene_info$ensembl_gene_id), ]
 
-
 ```
 
-## Descriptives per group
-
-```{r}
-group_by(metadata, sex_outcome) %>% 
-summarise(
-  count = n(),
-  median_birthweight = median(Birthweight, na.rm = TRUE),
-  iqr_birthweight = IQR(Birthweight, na.rm = TRUE),
-  median_gestation = median(GestationalAge, na.rm = TRUE),
-  iqr_gestation = IQR(GestationalAge, na.rm = TRUE),
-  median_maternalAge = median(maternalAge, na.rm = TRUE),
-  iqr_maternalAge = IQR(maternalAge, na.rm = TRUE),
-  median_BMI = median(BMI, na.rm = TRUE),
-  iqr_BMI = IQR(BMI, na.rm = TRUE),
-  Smoker = sum(SmokingStatus == "Y", na.rm = TRUE)
-  ) %>%
-  write_tsv(., file = output_descriptives_file,
-            col_names = TRUE)
-```
 # Plot the raw library sizes
 
 ```{r}
-data.frame(colSums(rawCounts[, -1])) %>%
-  rename(lib.size = colSums.rawCounts....1..) %>%
+data.frame(colSums(rawCounts_deduplicated[, -1])) %>%
+  rename(lib.size = colSums.rawCounts_deduplicated....1..) %>%
   tibble::rownames_to_column("samplename") %>%
   mutate(color = case_when(
     lib.size < 5000000 ~ "red",
@@ -118,7 +102,7 @@ data.frame(colSums(rawCounts[, -1])) %>%
        x = "Samplename") +
   scale_fill_identity() +
   coord_flip() +
-  ggtitle("Pre Deduplication Library Size")
+  ggtitle("Deduplicated Library Size")
 # ggsave(filename = output_librarySize_file,
 #        width = 7,
 #        height = 7,
@@ -131,7 +115,7 @@ data.frame(colSums(rawCounts[, -1])) %>%
 
 ```{r}
 # drop the samples not required for this analysis
-counts <- rawCounts %>%
+counts <- rawCounts_deduplicated %>%
   tibble::column_to_rownames("Geneid")
 counts <- counts[, metadata$samplename]
 
@@ -139,17 +123,23 @@ counts <- counts[, metadata$samplename]
 counts <- counts[rowSums(counts[])>0,] %>%
   tibble::rownames_to_column("ensembl_gene_id")
 
-# put the ensemble gene IDs into column 1
-counts <- dplyr::left_join(counts, gene_info, by = "ensembl_gene_id") %>%
-  dplyr::select(., ensembl_gene_id, hgnc_symbol, everything())
-dim(counts)
+# add the hgnc gene symbol, chromosome and biotype to the counts matrix
+counts_hgnc <- dplyr::left_join(counts, gene_info, by = "ensembl_gene_id") %>%
+  dplyr::select(., ensembl_gene_id, ensembl, hgnc_symbol, seqnames, gene_type, everything())
+dim(counts_hgnc) # 43423 63
+
+# drop rows with NAs introduced in the join
+counts_hgnc_clean <- counts_hgnc %>%
+  filter(!is.na(ensembl))
+dim(counts_hgnc_clean) # 42645 63
 
 # establish the DGEList
-dge_list_obj <- DGEList(counts = counts %>%
-                          tibble::column_to_rownames("ensembl_gene_id") %>% dplyr::select(., -hgnc_symbol),
-                           samples = metadata,
-                           group = metadata$group,
-                           genes = counts %>% dplyr::select(ensembl_gene_id, hgnc_symbol))
+dge_list_obj <- DGEList(counts = counts_hgnc_clean %>%
+                          tibble::column_to_rownames("ensembl") %>%
+                          dplyr::select(., -hgnc_symbol, -ensembl_gene_id, -seqnames, -gene_type),
+                        samples = metadata,
+                        group = metadata$group,
+                        genes = counts_hgnc_clean %>% dplyr::select(ensembl, hgnc_symbol, seqnames, gene_type))
 
 ```
 
@@ -174,7 +164,7 @@ dim(dge_list_obj)
 ```{r}
 # calculate normalisation factors and apply to the DGEList object
 dge_list_obj <- calcNormFactors(dge_list_obj,
-                           method = "TMM")
+                                method = "TMM")
 
 # # set the new factor levels
 sex_outcome_levels <- c("F_Control", "M_Control", "F_PE", "M_PE")
@@ -201,8 +191,8 @@ col_vector <- colors[as.numeric(as.factor(dge_list_obj$samples$sex_outcome))]
 #     units = "in",
 #     res = 150)
 # Create the MDS plot with customizations
-limma::plotMDS(dge_list_obj, col=col_vector, labels=dge_list_obj$samples$samplename, main="MDS Plot 58 samples")
-legend("topright", legend=sex_outcome_levels, col=colors, pch=20, xpd=TRUE, inset=c(-0.2, 0))
+limma::plotMDS(dge_list_obj, col=col_vector, labels=dge_list_obj$samples$samplename, main="MDS Plot 58 samples - deduplicated")
+legend("topright", legend=sex_outcome_levels, col=colors, pch=20, xpd=TRUE, inset=c(0.01, -0.1))
 # dev.off()
 ```
 # Sex-specific BCV
@@ -229,8 +219,8 @@ bcv_table_male <- data.frame(
 )
 
 # save the table to a CSV file:
-write.csv(bcv_table_male, file = output_gene_wise_bcv_results_male_file,
-row.names = FALSE)
+# write.csv(bcv_table_male, file = output_gene_wise_bcv_results_male_file,
+# row.names = FALSE)
 
 # plot the BCVs
 plotBCV(y_male,
@@ -261,8 +251,8 @@ bcv_table_female <- data.frame(
 )
 
 # save the table to a CSV file:
-write.csv(bcv_table_female, file = output_gene_wise_bcv_results_female_file,
-row.names = FALSE)
+# write.csv(bcv_table_female, file = output_gene_wise_bcv_results_female_file,
+# row.names = FALSE)
 
 plotBCV(y_female,
         xlab = "Average log CPM",
@@ -295,7 +285,6 @@ ggplot(bcv_combined, aes(x = BCV,
        x = "BCV",
        y = "Density") +
   theme_minimal()
-
 
 ```
 
@@ -339,7 +328,6 @@ log2CPM <- edgeR::cpm(dge_list_obj, log = TRUE)
 #   write_csv(., file = output_log2CPM_file,
 #            col_names = TRUE)
 
-
 ```
 
 # Differential Expression
@@ -355,7 +343,7 @@ design_sex_PE <- model.matrix(formula(model_noCovariate),
                               data = dge_list_obj$samples)
 # make the column names a little nicer
 colnames(design_sex_PE) <- c(sex_outcome_levels)
-design_sex_PE
+
 # save a csv of the design matrix
 # write_csv(data.frame(design_sex_PE) %>%
 #             tibble::rownames_to_column("samplename"),
@@ -385,16 +373,17 @@ contrast_fit_sex_PE <- contrasts.fit(fit_sex_PE, contrast_sex_PE)
 contrast_fit_sex_PE <- eBayes(contrast_fit_sex_PE)
 
 # grab the residuals
-res_pre_dedup <- residuals(fit_sex_PE,voom_sex_PE)
-# saveRDS(res_pre_dedup,
-#         file = file.path(projectDir, "clearBoxCleanData/pre_dedup_residuals.rds"))
+res_post_dedup <- residuals(fit_sex_PE,voom_sex_PE)
+# saveRDS(res_post_dedup,
+#         file = file.path(projectDir, "deduplicated_clearBox/output/post_dedup_residuals.rds"))
 
 # grab the fitted values
-fitted_pre_dedup <- fitted(fit_sex_PE)
-# saveRDS(fitted_pre_dedup,
-#         file = file.path(projectDir, "clearBoxCleanData/pre_dedup_fitted.rds"))
+fitted_post_dedup <- fitted(fit_sex_PE)
+# saveRDS(fitted_post_dedup,
+#         file = file.path(projectDir, "deduplicated_clearBox/output/post_dedup_fitted.rds"))
 
 # check the coefficients
+contrast_fit_sex_PE$coefficients
 dim(contrast_fit_sex_PE$coefficients)
 ```
 
@@ -409,13 +398,12 @@ allTable_female_PE <- topTable(contrast_fit_sex_PE,
                              coef = "female_PE",
                              n = Inf,
                              sort = "p")
-
-# # create output files and save
+# create output files and save
 # write_csv(allTable_female_PE,
-#           file="/home/smit1924/preeclampsia_sex_chromosome_informed/noCovariate_output/allTable_female.csv")
+#           file="/home/smit1924/preeclampsia_sex_chromosome_informed/deduplicated_clearBox/output/allTable_female.csv")
 
 write_csv(allTable_female_PE,
-          file="/media/sf_D_DRIVE/VM_Projects/20240723_compare_pre_post_dedup/allTable_female_pre_dedup.csv")
+          file="/media/sf_D_DRIVE/VM_Projects/20240723_compare_pre_post_dedup/allTable_female_post_dedup.csv")
 
 
 # all DE results for the male comparison
@@ -424,10 +412,10 @@ allTable_male_PE <- topTable(contrast_fit_sex_PE,
                              n = Inf,
                              sort = "p")
 # write_csv(allTable_male_PE,
-#           file="/home/smit1924/preeclampsia_sex_chromosome_informed/noCovariate_output/allTable_male.csv")
+#           file="/home/smit1924/preeclampsia_sex_chromosome_informed/deduplicated_clearBox/output/allTable_male.csv")
 
 write_csv(allTable_male_PE,
-          file="/media/sf_D_DRIVE/VM_Projects/20240723_compare_pre_post_dedup/allTable_male_pre_dedup.csv")
+          file="/media/sf_D_DRIVE/VM_Projects/20240723_compare_pre_post_dedup/allTable_male_post_dedup.csv")
 
 topTable_male_pe <- topTable(contrast_fit_sex_PE,
                              coef = "male_PE",
@@ -627,7 +615,7 @@ volcano_male <- ggplot(data = FDR_FC_Decide,
   theme(legend.position="bottom")
 
 ggsave(plot = volcano_male,
-       filename = file.path(projectDir, "noCovariate_output/volcano_male.png"),
+       filename = file.path(projectDir, "deduplicated_clearBox/output/volcano_male.png"),
        units = "in",
        width = 12,
        height = 12,
