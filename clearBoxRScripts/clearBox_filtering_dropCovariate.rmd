@@ -339,7 +339,7 @@ log2CPM <- edgeR::cpm(dge_list_obj, log = TRUE)
 #   as.data.frame() %>%
 #   tibble::rownames_to_column("ensembl") %>%
 #   write_csv(., file = output_log2CPM_file,
-#            col_names = TBCVBCVBCVBCVffBCVgggggggggg
+#            col_names = TRUE)
 
 
 ```
@@ -405,6 +405,19 @@ contrast_fit_sex_PE <- contrasts.fit(fit_sex_PE, contrast_sex_PE)
 
 # perform bayesian adjustment
 contrast_fit_sex_PE <- eBayes(contrast_fit_sex_PE)
+
+# grab the residuals
+res_pre_dedup <- residuals(fit_sex_PE,voom_sex_PE)
+# saveRDS(res_pre_dedup,
+#         file = file.path(projectDir, "clearBoxCleanData/pre_dedup_residuals.rds"))
+
+# grab the fitted values
+fitted_pre_dedup <- fitted(fit_sex_PE)
+# saveRDS(fitted_pre_dedup,
+#         file = file.path(projectDir, "clearBoxCleanData/pre_dedup_fitted.rds"))
+
+# check the coefficients
+dim(contrast_fit_sex_PE$coefficients)
 ```
 
 ```{r}
@@ -415,9 +428,10 @@ summary(decideTests(contrast_fit_sex_PE,
 
 # all DE results for the female_PE comparison
 allTable_female_PE <- topTable(contrast_fit_sex_PE,
-                             coef = 1,
+                             coef = "female_PE",
                              n = Inf,
                              sort = "p")
+
 # # create output files and save
 # write_csv(allTable_female_PE,
 #           file="/home/smit1924/preeclampsia_sex_chromosome_informed/noCovariate_output/allTable_female.csv")
@@ -425,7 +439,7 @@ allTable_female_PE <- topTable(contrast_fit_sex_PE,
 
 # all DE results for the male comparison
 allTable_male_PE <- topTable(contrast_fit_sex_PE,
-                             coef = 2,
+                             coef = "male_PE",
                              n = Inf,
                              sort = "p")
 # write_csv(allTable_male_PE,
@@ -433,7 +447,7 @@ allTable_male_PE <- topTable(contrast_fit_sex_PE,
 
 
 topTable_male_pe <- topTable(contrast_fit_sex_PE,
-                             coef = 2,
+                             coef = "male_PE",
                              n = Inf,
                              sort = "p",
                              p = 0.05,
