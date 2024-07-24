@@ -25,12 +25,16 @@ library(pheatmap)
 projectDir <- "/home/smit1924/preeclampsia_sex_chromosome_informed"
 # projectDir <- "/Users/pillmaka/Desktop/Melanie/drive-download"
 
+# input files
 counts_geneID_file <- file.path(projectDir, "deduplicated_clearBox/readCounts/deduplicated_s2_readCounts.txt")
 
 gene_info_file <- file.path(projectDir, "clearBoxCleanData/gencode_v29_gene_id_symbol_chr_biotype.csv")
 metadata_file <- file.path(projectDir, "clearBoxRawData/cleanSampleMetadata.csv")
 
+# set the output directory
 outdir <- file.path(projectDir, "deduplicated_clearBox/output")
+
+# output files
 output_spreadsheet_file <- file.path(outdir, "filtered_DE.csv")
 output_pValue_file <- file.path(outdir, "pValue_DE.csv")
 output_log2CPM_file <- file.path(outdir, "log2CPM.csv")
@@ -38,7 +42,7 @@ output_dgelist_58_file <- file.path(projectDir, "deduplicated_clearBox/output/fi
 output_gene_wise_bcv_results_male_file <- file.path(projectDir, "deduplicated_clearBox/output/dedup_gene_wise_bcv_results_male.csv")
 output_gene_wise_bcv_results_female_file <- file.path(projectDir, "deduplicated_clearBox/output/dedup_gene_wise_bcv_results_female.csv")
 
-# save figures
+# set figure files
 output_librarySize_file <- file.path(projectDir, "deduplicated_clearBox/output/deduplicated_librarySizePlot.png")
 output_mds_file <- file.path(projectDir, "deduplicated_clearBox/output/deduplicated_58_mds.png")
 
@@ -399,11 +403,11 @@ allTable_female_PE <- topTable(contrast_fit_sex_PE,
                              n = Inf,
                              sort = "p")
 # create output files and save
-# write_csv(allTable_female_PE,
-#           file="/home/smit1924/preeclampsia_sex_chromosome_informed/deduplicated_clearBox/output/allTable_female.csv")
-
 write_csv(allTable_female_PE,
-          file="/media/sf_D_DRIVE/VM_Projects/20240723_compare_pre_post_dedup/allTable_female_post_dedup.csv")
+          file="/home/smit1924/preeclampsia_sex_chromosome_informed/deduplicated_clearBox/output/allTable_female_post_dedup.csv")
+
+# write_csv(allTable_female_PE,
+#           file="/media/sf_D_DRIVE/VM_Projects/20240723_compare_pre_post_dedup/allTable_female_post_dedup.csv")
 
 
 # all DE results for the male comparison
@@ -411,11 +415,11 @@ allTable_male_PE <- topTable(contrast_fit_sex_PE,
                              coef = "male_PE",
                              n = Inf,
                              sort = "p")
-# write_csv(allTable_male_PE,
-#           file="/home/smit1924/preeclampsia_sex_chromosome_informed/deduplicated_clearBox/output/allTable_male.csv")
-
 write_csv(allTable_male_PE,
-          file="/media/sf_D_DRIVE/VM_Projects/20240723_compare_pre_post_dedup/allTable_male_post_dedup.csv")
+          file="/home/smit1924/preeclampsia_sex_chromosome_informed/deduplicated_clearBox/output/allTable_male_post_dedup.csv")
+
+# write_csv(allTable_male_PE,
+#           file="/media/sf_D_DRIVE/VM_Projects/20240723_compare_pre_post_dedup/allTable_male_post_dedup.csv")
 
 topTable_male_pe <- topTable(contrast_fit_sex_PE,
                              coef = "male_PE",

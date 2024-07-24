@@ -25,12 +25,13 @@ library(pheatmap)
 projectDir <- "/home/smit1924/preeclampsia_sex_chromosome_informed"
 
 # Input files
-input_male_dedup_allTable_file <- file.path(projectDir, "deduplicated_clearBox/output/allTable_male.csv")
-input_female_dedup_allTable_file <- file.path(projectDir, "deduplicated_clearBox/output/allTable_female.csv")
-
 input_male_prededup_allTable_file <- file.path(projectDir, "noCovariate_output/allTable_male.csv")
 input_female_prededup_allTable_file <- file.path(projectDir, "noCovariate_output/allTable_female.csv")
 
+input_male_dedup_allTable_file <- file.path(projectDir, "deduplicated_clearBox/output/allTable_male_post_dedup.csv")
+input_female_dedup_allTable_file <- file.path(projectDir, "deduplicated_clearBox/output/allTable_female_post_dedup.csv")
+
+# set the output directory
 outdir <- file.path(projectDir, "deduplicated_clearBox/output")
 
 # save figures
@@ -51,11 +52,11 @@ options(digits=3)
 # import allTables
 
 ```{r}
-male_dedup_allTable <- read_csv(input_male_dedup_allTable_file)
-female_dedup_allTable <- read_csv(input_male_dedup_allTable_file)
-
 male_prededup_allTable <- read_csv(input_male_prededup_allTable_file)
 female_prededup_allTable <- read_csv(input_female_prededup_allTable_file)
+
+male_dedup_allTable <- read_csv(input_male_dedup_allTable_file)
+female_dedup_allTable <- read_csv(input_female_dedup_allTable_file)
 
 ```
 
@@ -98,29 +99,88 @@ ggsave(filename = output_scatterplot_logFC_male_file,
        units = "in",
        dpi = 150)
 
+# Plot with ggplot2
+ggplot(plot_data, aes(x = -log10(adj.P.Val.x), y = -log10(adj.P.Val.y))) +
+  # Plot all points in black first
+  geom_point(data = plot_data %>% filter(color == "black"), aes(color = color)) +
+  # Plot the green and red points on top
+  geom_point(data = plot_data %>% filter(color != "black"), aes(color = color)) +
+  scale_color_manual(values = c("black" = "black", "green" = "green", "red" = "red"),
+                     labels = c("black" = "Non-significant", 
+                                "green" = "Upregulated (adj.P.Val < 0.05)",
+                                "red" = "Downregulated (adj.P.Val < 0.05)"),
+                     guide = "legend") +
+  theme_bw() +
+  labs(title = "Male Comparison",
+       x = "-log10 FDR Pre-Deduplication",
+       y = "-log10 FDR Post-Deduplication",
+       color = "Significance") +
+  theme(legend.position = "bottom")
+ggsave(filename = output_scatterplot_FDR_male_file,
+       width = 8,
+       height = 8,
+       units = "in",
+       dpi = 150)
+
+
+ggplot(plot_data, aes(x = t.x, y = t.y)) +
+  # Plot all points in black first
+  geom_point(data = plot_data %>% filter(color == "black"), aes(color = color)) +
+  # Plot the green and red points on top
+  geom_point(data = plot_data %>% filter(color != "black"), aes(color = color)) +
+  scale_color_manual(values = c("black" = "black", "green" = "green", "red" = "red"),
+                     labels = c("black" = "Non-significant", 
+                                "green" = "Upregulated (adj.P.Val < 0.05)",
+                                "red" = "Downregulated (adj.P.Val < 0.05)"),
+                     guide = "legend") +
+  theme_bw() +
+  labs(title = "Male Comparison",
+       x = "t-statistic Pre-Deduplication",
+       y = "t-statistic Post-Deduplication",
+       color = "Significance") +
+  theme(legend.position = "bottom")
+
+ggplot(plot_data, aes(x = P.Value.x, y = P.Value.y)) +
+  # Plot all points in black first
+  geom_point(data = plot_data %>% filter(color == "black"), aes(color = color)) +
+  # Plot the green and red points on top
+  geom_point(data = plot_data %>% filter(color != "black"), aes(color = color)) +
+  scale_color_manual(values = c("black" = "black", "green" = "green", "red" = "red"),
+                     labels = c("black" = "Non-significant", 
+                                "green" = "Upregulated (adj.P.Val < 0.05)",
+                                "red" = "Downregulated (adj.P.Val < 0.05)"),
+                     guide = "legend") +
+  theme_bw() +
+  labs(title = "Male Comparison",
+       x = "P.Value Pre-Deduplication",
+       y = "P.Value Post-Deduplication",
+       color = "Significance") +
+  theme(legend.position = "bottom")
+
 ```
 
 # Female Comparison
 ```{r}
 
 # Join the tables and create a new column for color
-plot_data <- dplyr::left_join(
+plot_data_female <- dplyr::left_join(
   dplyr::select(female_prededup_allTable, ensembl = ensembl_gene_id, everything()), 
-  female_dedup_allTable, 
+  dplyr::mutate(female_dedup_allTable, ensembl_copy = ensembl), 
   by = "ensembl"
 ) %>%
   mutate(colour = case_when(
     adj.P.Val.x < 0.05 & logFC.x > 0 ~ "green",
     adj.P.Val.x < 0.05 & logFC.x < 0 ~ "red",
     TRUE ~ "black"
-  ))
+  )) %>%
+  dplyr::select(., ensembl, ensembl_copy, everything())
 
 # Plot with ggplot2
-ggplot(plot_data, aes(x = logFC.x, y = logFC.y)) +
+ggplot(plot_data_female, aes(x = logFC.x, y = logFC.y)) +
   # Plot all points in black first
-  geom_point(data = plot_data %>% filter(colour == "black"), aes(color = colour)) +
+  geom_point(data = plot_data_female %>% filter(colour == "black"), aes(color = colour)) +
   # Plot the green and red points on top
-  geom_point(data = plot_data %>% filter(colour != "black"), aes(color = colour)) +
+  geom_point(data = plot_data_female %>% filter(colour != "black"), aes(color = colour)) +
   scale_color_manual(values = c("black" = "black", "green" = "green", "red" = "red"),
                      labels = c("black" = "Non-significant", 
                                 "green" = "Upregulated (adj.P.Val < 0.05)",
@@ -137,6 +197,48 @@ ggsave(filename = output_scatterplot_logFC_female_file,
        height = 8,
        units = "in",
        dpi = 150)
+
+
+ggplot(plot_data_female, aes(x = t.x, y = t.y)) +
+  # Plot all points in black first
+  geom_point(data = plot_data_female %>% filter(colour == "black"), aes(colour = colour)) +
+  # Plot the green and red points on top
+  geom_point(data = plot_data_female %>% filter(colour != "black"), aes(colour = colour)) +
+  scale_color_manual(values = c("black" = "black", "green" = "green", "red" = "red"),
+                     labels = c("black" = "Non-significant", 
+                                "green" = "Upregulated (adj.P.Val < 0.05)",
+                                "red" = "Downregulated (adj.P.Val < 0.05)"),
+                     guide = "legend") +
+  theme_bw() +
+  labs(title = "Female Comparison",
+       x = "t-statistic Pre-Deduplication",
+       y = "t-statistic Post-Deduplication",
+       color = "Significance") +
+  theme(legend.position = "bottom")
+
+ggplot(plot_data_female, aes(x = -log10(P.Value.x),
+                             y = -log10(P.Value.y))) +
+  # Plot all points in black first
+  geom_point(data = plot_data_female %>% filter(colour == "black"), aes(colour = colour)) +
+  # Plot the green and red points on top
+  geom_point(data = plot_data_female %>% filter(colour != "black"), aes(colour = colour)) +
+  scale_color_manual(values = c("black" = "black", "green" = "green", "red" = "red"),
+                     labels = c("black" = "Non-significant", 
+                                "green" = "Upregulated (adj.P.Val < 0.05)",
+                                "red" = "Downregulated (adj.P.Val < 0.05)"),
+                     guide = "legend") +
+  theme_bw() +
+  labs(title = "Female Comparison",
+       x = "-ve log10 P.Value Pre-Deduplication",
+       y = "-ve log10 P.Value Post-Deduplication",
+       color = "Significance") +
+  theme(legend.position = "bottom")
+ggsave(filename = output_scatterplot_FDR_female_file,
+       width = 8,
+       height = 8,
+       units = "in",
+       dpi = 150)
+
 
 ```
 

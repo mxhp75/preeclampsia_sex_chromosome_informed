@@ -411,11 +411,11 @@ allTable_female_PE <- topTable(contrast_fit_sex_PE,
                              sort = "p")
 
 # # create output files and save
-# write_csv(allTable_female_PE,
-#           file="/home/smit1924/preeclampsia_sex_chromosome_informed/noCovariate_output/allTable_female.csv")
-
 write_csv(allTable_female_PE,
-          file="/media/sf_D_DRIVE/VM_Projects/20240723_compare_pre_post_dedup/allTable_female_pre_dedup.csv")
+          file="/home/smit1924/preeclampsia_sex_chromosome_informed/noCovariate_output/allTable_female.csv")
+
+# write_csv(allTable_female_PE,
+#           file="/media/sf_D_DRIVE/VM_Projects/20240723_compare_pre_post_dedup/allTable_female_pre_dedup.csv")
 
 
 # all DE results for the male comparison
@@ -423,11 +423,11 @@ allTable_male_PE <- topTable(contrast_fit_sex_PE,
                              coef = "male_PE",
                              n = Inf,
                              sort = "p")
-# write_csv(allTable_male_PE,
-#           file="/home/smit1924/preeclampsia_sex_chromosome_informed/noCovariate_output/allTable_male.csv")
-
 write_csv(allTable_male_PE,
-          file="/media/sf_D_DRIVE/VM_Projects/20240723_compare_pre_post_dedup/allTable_male_pre_dedup.csv")
+          file="/home/smit1924/preeclampsia_sex_chromosome_informed/noCovariate_output/allTable_male.csv")
+
+# write_csv(allTable_male_PE,
+#           file="/media/sf_D_DRIVE/VM_Projects/20240723_compare_pre_post_dedup/allTable_male_pre_dedup.csv")
 
 topTable_male_pe <- topTable(contrast_fit_sex_PE,
                              coef = "male_PE",
