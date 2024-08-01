@@ -1,0 +1,444 @@
+---
+title: "post_dedup_correlation_cell_type_de"
+author: "Melanie Smith"
+date: "29 July 2024"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(
+    echo = TRUE,
+    message = FALSE,
+    warning = FALSE,
+    cache = FALSE,
+    fig.show='hold',
+    fig.align = "center",
+    results = "hide"
+)
+
+```
+
+# Load required libraries
+
+```{r load Libraries}
+library(plyr)
+library(reshape2)
+library(dplyr)
+library(tidyr)
+library(stringr)
+library(edgeR)
+library(readxl)
+library(readr)
+library(magrittr)
+library(tibble)
+library(ggplot2)
+library(ggbeeswarm)
+library(ggrepel)
+library(ggExtra)
+library(pheatmap)
+
+```
+
+```{r}
+# set project directory
+projectDir <- "/home/smit1924/preeclampsia_sex_chromosome_informed"
+
+# file paths for files to be imported
+
+input_dge_list_obj_file <- file.path(projectDir, "deduplicated_clearBox/output/filt_norm_dgelist_58_post_dedup.rds")
+input_tpm_table_file <- file.path(projectDir, "deduplicated_clearBox/output/tpm_allSample_deduplicated_bulkCountMatrix.txt")
+input_metadata_quality_file <- file.path(projectDir, "clearBoxCleanData/metadata_quality.csv")
+input_allTable_female_file <- file.path(projectDir, "deduplicated_clearBox/output/allTable_female_post_dedup.csv")
+input_allTable_male_file <- file.path(projectDir, "deduplicated_clearBox/output/allTable_male_post_dedup.csv")
+gene_info_file <- file.path(projectDir, "clearBoxCleanData/gencode_v29_gene_id_symbol_chr_biotype.csv")
+
+input_cibersortx_post_dedup_proportions_file <- file.path(projectDir, "deduplicated_clearBox/cibersortx_output/CIBERSORTx_Job10_Adjusted.txt")
+input_cibersortx_sigMatrix_file <- file.path(projectDir, "cibersortx_reduced_sigMatrix/outdir/CIBERSORTx_sigmatrix_Adjusted.txt")
+
+
+# file paths for output files
+outdir <- file.path("/media/sf_D_DRIVE/VM_Projects/20240619_deduplicateBams/plots")
+
+
+# create directories for output files
+
+dir.create(outdir)
+
+# set max digits
+options(digits=3)
+
+`%notin%` <- Negate(`%in%`)
+
+```
+
+# Import files
+
+```{r}
+# import the DGEList object used in the post deduplication DE analysis
+dge_list_obj <- readRDS(input_dge_list_obj_file)
+
+# import the tpm table calculated for the post deduplication cibersortx run
+tpm_table <- read.table(file = input_tpm_table_file,
+                        header = TRUE,
+                        sep = "\t")
+colnames(tpm_table) <- stringr::str_remove(colnames(tpm_table), "_dedup")
+
+# import the metadata file
+metadata_quality <- read_csv(file = input_metadata_quality_file)
+
+# import the allTables from the post deduplication DE
+allTable_female <- read_csv(file = input_allTable_female_file)
+allTable_male <- read_csv(file = input_allTable_male_file)
+
+# import the V29 gene unformation file
+gene_info <- read_csv(file = gene_info_file)
+
+# import the post deduplication cibersortx proportions
+cibersortx_post_dedup_proportions <- read.table(file = input_cibersortx_post_dedup_proportions_file,
+                                                header = TRUE,
+                                                sep = "\t") %>%
+  dplyr::select(., samplename = Mixture, everything()) %>%
+  dplyr::select(., -'P.value', -'Correlation', -'RMSE') %>%
+  dplyr::mutate(., samplename = stringr::str_remove(samplename, "_dedup")) #%>%
+  # subset(., samplename %notin% c("SCP4060", "SCP3492", "SCP4010"))
+
+# import the cibersort signature matrix (reduced cell types and after adjustment)
+cibersortx_reduced_sigMatrix <- read.table(file = input_cibersortx_sigMatrix_file,
+                                           header = TRUE,
+                                           sep = "\t")
+
+# remove rows that contain all zero counts in the signature matrix
+cibersortx_reduced_sigMatrix <- cibersortx_reduced_sigMatrix[rowSums(cibersortx_reduced_sigMatrix[,-1])>0,]
+dim(cibersortx_reduced_sigMatrix)
+
+
+```
+# Correlate gene expression with cell-type proportions
+## Include genes that are both DE and in the cibersortx signature matrix  
+- I will use the tpm matrix for the correlation as this is the table that is input into Cibersortx. Might not make any difference.  
+
+```{r}
+
+# put the hgnc symbol into the rownames for the tpm matrix
+## drop rows with duplicate hgnc symbols
+tpm_bulkCountMatrix_all_genes <- tpm_table[!duplicated(tpm_table$hgnc_symbol), ] %>%
+  dplyr::select(., -SCP4060, -SCP3492, -SCP4010)
+## ensure rownames are empty
+rownames(tpm_bulkCountMatrix_all_genes) <- NULL
+# move hgnc column to the rownames
+tpm_bulkCountMatrix_all_genes %<>% tibble::column_to_rownames("hgnc_symbol")
+
+# overlap between signature and DE genes - this is used to cut down the number of genes tested for correlation
+topTable_male <- dplyr::filter(allTable_male, adj.P.Val < 0.05)
+sig_de_overlap <- subset(cibersortx_reduced_sigMatrix, GeneSymbol %in% topTable_male$hgnc_symbol)
+  
+
+# Initialize an empty data frame to store correlation results
+final_correlation_results <- data.frame(Cell_Type = names(sig_de_overlap)[-1], stringsAsFactors = FALSE)
+
+# loop through the genes and correlate with cell-type proportions
+for (i in 1:nrow(sig_de_overlap)) {
+  
+  sig_de_overlap_ensbl <- dplyr::left_join(sig_de_overlap, topTable_male[, c("ensembl", "hgnc_symbol")], by = c("GeneSymbol" = "hgnc_symbol")) %>%
+    dplyr::select(., GeneSymbol, ensembl, everything())
+  
+  GOI_ensbl <- paste0(sig_de_overlap_ensbl$ensembl_gene_id[i])
+  GOI_hgnc <- paste0(sig_de_overlap_ensbl$GeneSymbol[i])
+  
+  cibersortx_proportion_rownames <- cibersortx_post_dedup_proportions %>%
+    tibble::column_to_rownames("samplename")
+
+  tpm_GOI <- reshape2::melt(
+  subset(tpm_bulkCountMatrix_all_genes, rownames(tpm_bulkCountMatrix_all_genes) %in% sig_de_overlap_ensbl$GeneSymbol[i]) %>%
+    tibble::rownames_to_column()
+  ) %>% 
+    as.data.frame() %>% 
+    set_colnames(c("ensbl", "samplename", paste0(sig_de_overlap_ensbl$ensembl[i]))) %>% 
+    dplyr::select(., -ensbl) %>%
+    dplyr::left_join(., cibersortx_post_dedup_proportions, by = "samplename") %>%
+    dplyr::select(., -samplename)
+  
+  # Calculate correlations between gene expression and cell type proportions for each cell type
+  correlations <- lapply(colnames(tpm_GOI)[-1], function(cell_type) {
+    cor(tpm_GOI[[1]], tpm_GOI[[cell_type]])
+  })
+  
+  # Combine correlations into a data frame
+  correlation_results <- data.frame(names(tpm_GOI)[-1])
+  
+  # Add correlation results for the current gene as new columns
+  colnames(correlation_results) <- paste(GOI_hgnc)
+  correlation_results[] <- unlist(correlations)
+  
+  # Append the current gene's correlation results to the final data frame
+  final_correlation_results <- cbind(final_correlation_results, correlation_results)
+  
+}
+
+dim_final_correlation_all_samples <- dim(final_correlation_results)
+
+# prepare the correlations for plotting
+final_correlation_results <- final_correlation_results %>%
+  mutate_all(~replace(., is.na(.), 0)) %>%
+    column_to_rownames("Cell_Type")
+
+# png(file=file.path(outdir, "post_dedup_correlation_heatmap.png"),
+#     width=12,
+#     height=8,
+#     units = "in",
+#     res = 150)
+pheatmap(final_correlation_results)
+# dev.off()
+```
+
+## Male samples only
+
+```{r}
+# create a vector of male sample IDs
+male_samplename <- metadata_quality %>%
+  filter(Sex == "M") %>%
+  pull(samplename)
+
+# put the hgnc symbol into the rownames for the tpm matrix
+## drop rows with duplicate hgnc symbols
+tpm_bulkCountMatrix_all_genes_male <- tpm_table[!duplicated(tpm_table$hgnc_symbol), ]
+tpm_bulkCountMatrix_all_genes_male <- tpm_bulkCountMatrix_all_genes_male[, c("hgnc_symbol", male_samplename)]
+## ensure rownames are empty
+rownames(tpm_bulkCountMatrix_all_genes_male) <- NULL
+# move hgnc column to the rownames
+tpm_bulkCountMatrix_all_genes_male %<>% tibble::column_to_rownames("hgnc_symbol")
+
+# overlap between signature and DE genes - this is used to cut down the number of genes tested for correlation
+topTable_male <- dplyr::filter(allTable_male, adj.P.Val < 0.05)
+sig_de_overlap <- subset(cibersortx_reduced_sigMatrix, GeneSymbol %in% topTable_male$hgnc_symbol)
+  
+
+# Initialize an empty data frame to store correlation results
+final_correlation_results <- data.frame(Cell_Type = names(sig_de_overlap)[-1], stringsAsFactors = FALSE)
+
+# loop through the genes and correlate with cell-type proportions
+for (i in 1:nrow(sig_de_overlap)) {
+  
+  # Join sig_de_overlap with topTable_male to get the ensembl IDs
+  sig_de_overlap_ensbl <- dplyr::left_join(sig_de_overlap, topTable_male[, c("ensembl", "hgnc_symbol")], by = c("GeneSymbol" = "hgnc_symbol")) %>%
+    dplyr::select(., GeneSymbol, ensembl, everything())
+  
+  GOI_ensbl <- paste0(sig_de_overlap_ensbl$ensembl_gene_id[i])
+  GOI_hgnc <- paste0(sig_de_overlap_ensbl$GeneSymbol[i])
+  
+  cibersortx_proportion_rownames <- cibersortx_post_dedup_proportions %>%
+    tibble::column_to_rownames("samplename")
+  
+  tpm_GOI <- reshape2::melt(
+  subset(tpm_bulkCountMatrix_all_genes_male, rownames(tpm_bulkCountMatrix_all_genes_male) %in% sig_de_overlap_ensbl$GeneSymbol[i]) %>%
+    tibble::rownames_to_column()
+  ) %>% 
+    as.data.frame() %>% 
+    set_colnames(c("ensbl", "samplename", paste0(sig_de_overlap_ensbl$ensembl[i]))) %>% 
+    dplyr::select(., -ensbl) %>%
+    dplyr::left_join(., cibersortx_post_dedup_proportions, by = "samplename") %>%
+    dplyr::select(., -samplename)
+
+  # Calculate correlations between gene expression and cell type proportions for each cell type
+  correlations <- lapply(colnames(tpm_GOI)[-1], function(cell_type) {
+    cor(tpm_GOI[[1]], tpm_GOI[[cell_type]])
+  })
+  
+  # Combine correlations into a data frame
+  correlation_results <- data.frame(names(tpm_GOI)[-1])
+  
+  # Add correlation results for the current gene as new columns
+  colnames(correlation_results) <- paste(GOI_hgnc)
+  correlation_results[] <- unlist(correlations)
+  
+  # Append the current gene's correlation results to the final data frame
+  final_correlation_results <- cbind(final_correlation_results, correlation_results)
+  
+}
+
+# prepare the correlations for plotting
+final_correlation_results_plot_male <- final_correlation_results %>%
+  mutate_all(~replace(., is.na(.), 0)) %>%
+    column_to_rownames("Cell_Type")
+
+# Format the numbers to two decimal places
+formatted_numbers <- apply(final_correlation_results_plot_male, 2, function(x) sprintf("%.2f", x))
+
+dim_final_correlation_males <- dim(final_correlation_results) # 20 44
+
+png(file=file.path(outdir, "male_post_dedup_correlation_heatmap.png"),
+    width=14,
+    height=8,
+    units = "in",
+    res = 150)
+pheatmap(final_correlation_results_plot_male,
+         cluster_rows = TRUE,
+         cluster_cols = TRUE,
+  display_numbers = formatted_numbers,
+  number_fontsize = 9,
+  main = "Correlations between expression of DE genes and cell types - Male")
+dev.off()
+```
+
+## Female samples only
+
+```{r}
+# create a vector of male sample IDs
+female_samplename <- metadata_quality %>%
+  filter(Sex == "F") %>%
+  pull(samplename)
+
+# put the hgnc symbol into the rownames for the tpm matrix
+## drop rows with duplicate hgnc symbols
+tpm_bulkCountMatrix_all_genes_female <- tpm_table[!duplicated(tpm_table$hgnc_symbol), ]
+tpm_bulkCountMatrix_all_genes_female <- tpm_bulkCountMatrix_all_genes_female[, c("hgnc_symbol", female_samplename)]
+## ensure rownames are empty
+rownames(tpm_bulkCountMatrix_all_genes_female) <- NULL
+# move hgnc column to the rownames
+tpm_bulkCountMatrix_all_genes_female %<>% tibble::column_to_rownames("hgnc_symbol")
+
+# overlap between signature and DE genes - this is used to cut down the number of genes tested for correlation
+topTable_male <- dplyr::filter(allTable_male, adj.P.Val < 0.05)
+sig_de_overlap <- subset(cibersortx_reduced_sigMatrix, GeneSymbol %in% topTable_male$hgnc_symbol)
+  
+
+# Initialize an empty data frame to store correlation results
+final_correlation_results <- data.frame(Cell_Type = names(sig_de_overlap)[-1], stringsAsFactors = FALSE)
+
+# loop through the genes and correlate with cell-type proportions
+for (i in 1:nrow(sig_de_overlap)) {
+  
+  # Join sig_de_overlap with topTable_male to get the ensembl IDs
+  sig_de_overlap_ensbl <- dplyr::left_join(sig_de_overlap, topTable_male[, c("ensembl", "hgnc_symbol")], by = c("GeneSymbol" = "hgnc_symbol")) %>%
+    dplyr::select(., GeneSymbol, ensembl, everything())
+  
+  GOI_ensbl <- paste0(sig_de_overlap_ensbl$ensembl_gene_id[i])
+  GOI_hgnc <- paste0(sig_de_overlap_ensbl$GeneSymbol[i])
+  
+  cibersortx_proportion_rownames <- cibersortx_post_dedup_proportions %>%
+    tibble::column_to_rownames("samplename")
+  
+  tpm_GOI <- reshape2::melt(
+  subset(tpm_bulkCountMatrix_all_genes_female, rownames(tpm_bulkCountMatrix_all_genes_female) %in% sig_de_overlap_ensbl$GeneSymbol[i]) %>%
+    tibble::rownames_to_column()
+  ) %>% 
+    as.data.frame() %>% 
+    set_colnames(c("ensbl", "samplename", paste0(sig_de_overlap_ensbl$ensembl[i]))) %>% 
+    dplyr::select(., -ensbl) %>%
+    dplyr::left_join(., cibersortx_post_dedup_proportions, by = "samplename") %>%
+    dplyr::select(., -samplename)
+
+  # Calculate correlations between gene expression and cell type proportions for each cell type
+  correlations <- lapply(colnames(tpm_GOI)[-1], function(cell_type) {
+    cor(tpm_GOI[[1]], tpm_GOI[[cell_type]])
+  })
+  
+  # Combine correlations into a data frame
+  correlation_results <- data.frame(names(tpm_GOI)[-1])
+  
+  # Add correlation results for the current gene as new columns
+  colnames(correlation_results) <- paste(GOI_hgnc)
+  correlation_results[] <- unlist(correlations)
+  
+  # Append the current gene's correlation results to the final data frame
+  final_correlation_results <- cbind(final_correlation_results, correlation_results)
+  
+}
+
+dim_final_correlation_females <- dim(final_correlation_results) # 20 44
+
+# prepare the correlations for plotting
+final_correlation_results_plot_female <- final_correlation_results %>%
+  mutate_all(~replace(., is.na(.), 0)) %>%
+    column_to_rownames("Cell_Type")
+
+# Format the numbers to two decimal places
+formatted_numbers <- apply(final_correlation_results_plot_female, 2, function(x) sprintf("%.2f", x))
+
+png(file=file.path(outdir, "female_post_dedup_correlation_heatmap.png"),
+    width=14,
+    height=8,
+    units = "in",
+    res = 150)
+pheatmap(final_correlation_results_plot_female,
+         cluster_rows = TRUE,
+         cluster_cols = TRUE,
+  display_numbers = formatted_numbers,
+  number_fontsize = 9,
+  main = "Correlations between expression of DE genes and cell types - Female")
+dev.off()
+```
+
+## Compare cell type proportions and correlations between sex
+
+```{r}
+
+rownames(final_correlation_results_plot_female) <- paste0(rownames(final_correlation_results_plot_female), "_female")
+rownames(final_correlation_results_plot_male) <- paste0(rownames(final_correlation_results_plot_male), "_male")
+
+heatmap_data <- rbind(final_correlation_results_plot_male, final_correlation_results_plot_female)
+# Format the numbers to two decimal places
+formatted_numbers_compare <- apply(heatmap_data[c("Cytotrophoblast_male", "Cytotrophoblast_female", "Fetal.Nucleated.Red.Blood.Cells_male", "Fetal.Nucleated.Red.Blood.Cells_female", "Fetal.Syncytiotrophoblast_male", "Fetal.Syncytiotrophoblast_female", "Fetal.Endothelial.Cells_male", "Fetal.Endothelial.Cells_female", "Fetal.Mesenchymal.Stem.Cells_male", "Fetal.Mesenchymal.Stem.Cells_female", "Fetal.Hofbauer.Cells_male", "Fetal.Hofbauer.Cells_female"),], 2, function(x) sprintf("%.2f", x))
+
+png(file=file.path(outdir, "compare_male_female_cor_heatmap.png"),
+    width=14,
+    height=8,
+    units = "in",
+    res = 150)
+pheatmap(heatmap_data[c("Cytotrophoblast_male", "Cytotrophoblast_female", "Fetal.Nucleated.Red.Blood.Cells_male", "Fetal.Nucleated.Red.Blood.Cells_female", "Fetal.Syncytiotrophoblast_male", "Fetal.Syncytiotrophoblast_female", "Fetal.Endothelial.Cells_male", "Fetal.Endothelial.Cells_female", "Fetal.Mesenchymal.Stem.Cells_male", "Fetal.Mesenchymal.Stem.Cells_female", "Fetal.Hofbauer.Cells_male", "Fetal.Hofbauer.Cells_female"),],
+         cluster_rows = FALSE,
+         display_numbers = formatted_numbers_compare,
+         number_fontsize = 9,
+         main = "Compare Correlations between Male and Female")
+dev.off()
+```
+
+## Compare mean proportions between male and female
+
+```{r}
+compare_proportions <- dplyr::left_join(cibersortx_post_dedup_proportions, metadata_quality[, c("samplename", "Sex", "sex_outcome")], by = "samplename") %>%
+  subset(., samplename %notin% c("SCP4010", "SCP4060", "SCP3492")) %>%
+  group_by(., Sex)
+
+# Calculate the mean of columns grouped by Sex, excluding specific columns
+mean_proportions <- compare_proportions %>%
+  group_by(Sex) %>%
+  summarise(across(-c(samplename, sex_outcome), mean, na.rm = TRUE)) %>%
+  t()
+```
+
+## Plot gene expression (x-axis) and cell-type proportion (y)
+
+```{r}
+
+cpms <- edgeR::cpm(dge_list_obj, log = FALSE)
+
+# Filter allTable_male to get ensembl IDs with adj.P.Val < 0.05
+filtered_ensembl <- allTable_male %>%
+  filter(adj.P.Val < 0.05) %>%
+  pull(ensembl)
+
+# Create a data frame with CPM values for the filtered ensembl IDs
+cpm_DE_genes <- cpms %>%
+  data.frame() %>%
+  tibble::rownames_to_column("ensembl") %>%
+  filter(ensembl %in% filtered_ensembl)
+
+
+temp <- cpm_DE_genes %>% tibble::column_to_rownames("ensembl") %>%
+  t() %>%
+  data.frame() %>%
+  tibble::rownames_to_column("samplename") %>%
+  dplyr::left_join(., compare_proportions, by = "samplename")
+
+
+
+ggplot(data = temp,
+       aes(x = ENSG00000162543,
+           y = Cytotrophoblast,
+           colour = sex_outcome)) +
+  geom_point()
+```
+
+
+
