@@ -20,6 +20,9 @@ library(ggplot2)
 library(ggbeeswarm)
 library(ggrepel)
 library(pheatmap)
+```
+
+```{r}
 
 # set project directory
 projectDir <- "/home/smit1924/preeclampsia_sex_chromosome_informed"
@@ -31,21 +34,22 @@ counts_geneID_file <- file.path(projectDir, "deduplicated_clearBox/readCounts/de
 gene_info_file <- file.path(projectDir, "clearBoxCleanData/gencode_v29_gene_id_symbol_chr_biotype.csv")
 metadata_file <- file.path(projectDir, "clearBoxRawData/cleanSampleMetadata.csv")
 
+input_cibersortx_post_dedup_proportions_file <- file.path(projectDir, "deduplicated_clearBox/cibersortx_output/CIBERSORTx_Job10_Adjusted.txt")
+input_cibersortx_sigMatrix_file <- file.path(projectDir, "cibersortx_reduced_sigMatrix/outdir/CIBERSORTx_sigmatrix_Adjusted.txt")
+
 # set the output directory
-outdir <- file.path(projectDir, "deduplicated_clearBox/output/58_sample_noCovariate")
+outdir <- file.path(projectDir, "deduplicated_clearBox/output/57_sample_noCovariate")
 
 # output files
 outDesignMatrix_file <- file.path(outdir, "designMatrix.csv")
 output_spreadsheet_file <- file.path(outdir, "combined_allTable.csv")
 output_pValue_file <- file.path(outdir, "pValue_DE.csv")
 output_log2CPM_file <- file.path(outdir, "log2CPM.csv")
-output_dgelist_58_file <- file.path(outdir, "filt_norm_dgelist_58.rds")
-output_gene_wise_bcv_results_male_file <- file.path(outdir, "dedup_gene_wise_bcv_results_male.csv")
-output_gene_wise_bcv_results_female_file <- file.path(outdir, "dedup_gene_wise_bcv_results_female.csv")
+output_dgelist_57_file <- file.path(outdir, "filt_norm_dgelist_57.rds")
 
 # set figure files
 output_librarySize_file <- file.path(outdir, "deduplicated_librarySizePlot.png")
-output_mds_file <- file.path(outdir, "deduplicated_58_mds.png")
+output_mds_file <- file.path(outdir, "deduplicated_57_mds.png")
 
 dir.create(outdir)
 
@@ -54,7 +58,10 @@ options(digits=3)
 
 # set filtering criteria
 filterCPM <- 2
-numSamples <- 5
+numSamples <- 4
+
+
+`%notin%` <- Negate(`%in%`)
 
 ```
 
@@ -76,7 +83,9 @@ colnames(rawCounts_deduplicated) <- gsub("X.media.sf_D_DRIVE.VM_Projects.2024061
 ```{r}
 
 ## Metadata
-metadata <- read_csv(file = metadata_file)
+metadata <- read_csv(file = metadata_file) %>%
+  # drop STP0148 from the metadata
+  dplyr::filter(., samplename != "STP0148")
 
 ## Gene ID versus GeneSymbol
 gene_info <- read_csv(file = gene_info_file)
@@ -87,18 +96,19 @@ gene_info <- gene_info[!duplicated(gene_info$ensembl_gene_id), ]
 
 ```
 
+
 # Plot the raw library sizes
 
 ```{r}
 data.frame(colSums(rawCounts_deduplicated[, -1])) %>%
-  rename(lib.size = colSums.rawCounts_deduplicated....1..) %>%
+  magrittr::set_colnames("lib.size") %>%
   tibble::rownames_to_column("samplename") %>%
   mutate(color = case_when(
     lib.size < 5000000 ~ "red",
     lib.size >= 5000000 & lib.size < 10000000 ~ "blue",
     lib.size >= 10000000 ~ "darkgreen"
   )) %>%
-  dplyr::filter(!samplename %in% c("SCP3492", "SCP4010", "SCP4060")) %>%
+  dplyr::filter(!samplename %in% c("SCP3492", "SCP4010", "SCP4060", "STP0148")) %>%
   ggplot(aes(x = reorder(samplename, -lib.size), y = lib.size, fill = color)) +
   geom_bar(stat = "identity") +
   geom_hline(yintercept = 5000000, linetype = "dashed", color = "red") +
@@ -108,11 +118,11 @@ data.frame(colSums(rawCounts_deduplicated[, -1])) %>%
   scale_fill_identity() +
   coord_flip() +
   ggtitle("Deduplicated Library Size")
-# ggsave(filename = output_librarySize_file,
-#        width = 7,
-#        height = 7,
-#        units = "in",
-#        dpi = 150)
+ggsave(filename = output_librarySize_file,
+       width = 7,
+       height = 7,
+       units = "in",
+       dpi = 150)
 
 ```
 
@@ -123,11 +133,11 @@ data.frame(colSums(rawCounts_deduplicated[, -1])) %>%
 counts <- rawCounts_deduplicated %>%
   tibble::column_to_rownames("Geneid")
 counts <- counts[, metadata$samplename]
-
+dim(counts)
 # drop rows with zero in all columns
 counts <- counts[rowSums(counts[])>0,] %>%
   tibble::rownames_to_column("ensembl_gene_id")
-
+dim(counts)
 # add the hgnc gene symbol, chromosome and biotype to the counts matrix
 counts_hgnc <- dplyr::left_join(counts, gene_info, by = "ensembl_gene_id") %>%
   dplyr::select(., ensembl_gene_id, ensembl, hgnc_symbol, seqnames, gene_type, everything())
@@ -145,12 +155,16 @@ dge_list_obj <- DGEList(counts = counts_hgnc_clean %>%
                         samples = metadata,
                         group = metadata$group,
                         genes = counts_hgnc_clean %>% dplyr::select(ensembl, hgnc_symbol, seqnames, gene_type))
+dim(dge_list_obj)
 
 ```
 
 # Filter biological noise and plot
 
 ```{r}
+# remove low information genes with zero counts across all samples
+dge_list_obj <- dge_list_obj[rowSums(dge_list_obj$counts) > 0, ]
+dim(dge_list_obj)
 
 # new df of unfiltered cpm for the reduced DGEList
 preFilterCPM <- cpm(dge_list_obj)
@@ -160,8 +174,6 @@ keep.exprs <- rowSums(preFilterCPM > filterCPM) >= numSamples
 
 # Perform the filtering step and recalculate the TMM normalisation factors for each library.
 dge_list_obj <- dge_list_obj[keep.exprs,,keep.lib.sizes = FALSE]
-
-dim(dge_list_obj)
 
 ```
 
@@ -176,8 +188,8 @@ sex_outcome_levels <- c("F_Control", "M_Control", "F_PE", "M_PE")
 dge_list_obj$samples$sex_outcome <- factor(dge_list_obj$samples$sex_outcome, levels=sex_outcome_levels)
 
 ## save the filtered and normalised DGEList object
-# saveRDS(dge_list_obj,
-#         file = output_dgelist_58_file)
+saveRDS(dge_list_obj,
+        file = output_dgelist_57_file)
 ```
 
 # Plot MDS
@@ -196,130 +208,16 @@ col_vector <- colors[as.numeric(as.factor(dge_list_obj$samples$sex_outcome))]
 #     units = "in",
 #     res = 150)
 # Create the MDS plot with customizations
-limma::plotMDS(dge_list_obj, col=col_vector, labels=dge_list_obj$samples$samplename, main="MDS Plot 58 samples - deduplicated")
-legend("topright", legend=sex_outcome_levels, col=colors, pch=20, xpd=TRUE, inset=c(0.01, -0.1))
+limma::plotMDS(dge_list_obj,
+               col=col_vector,
+               labels=dge_list_obj$samples$samplename,
+               main="MDS Plot 57 samples - deduplicated")
+legend("topright",
+       legend=sex_outcome_levels,
+       col=colors, pch=20,
+       xpd=TRUE,
+       inset=c(0.01, -0.1))
 # dev.off()
-```
-# Sex-specific BCV
-
-```{r}
-# vector of only male sample names
-males <- dplyr::filter(dge_list_obj$samples, Sex == "M")[, "samplename"]
-# subset DGEList to contain only males
-y_male <- dge_list_obj[, males]
-# calculate and plot BCV for male samples only
-y_male <- estimateCommonDisp(y_male,
-                             verbose = TRUE)
-y_male <- estimateTrendedDisp(y_male)
-y_male <- estimateTagwiseDisp(y_male)
-
-# Extract gene-wise BCV values
-gene_wise_bcv_male <- sqrt(y_male$tagwise.dispersion)
-
-# Create a data frame with gene names and BCV values
-bcv_table_male <- data.frame(
-  Gene = rownames(y_male),
-  BCV = gene_wise_bcv_male,
-  AveExpr = y_male$AveLogCPM
-)
-
-# save the table to a CSV file:
-# write.csv(bcv_table_male, file = output_gene_wise_bcv_results_male_file,
-# row.names = FALSE)
-
-# plot the BCVs
-plotBCV(y_male,
-        xlab = "Average log CPM",
-        ylab = "Biological coefficient of variation - male",
-        pch = 16,
-        cex = 0.2,
-        col.common = "red",
-        col.trend = "blue",
-        col.tagwise = "black")
-
-# vector of only female sample names
-females <- dplyr::filter(dge_list_obj$samples, Sex == "F")[, "samplename"]
-# subset DGEList to contain only females
-y_female <- dge_list_obj[, females]
-# calculate and plot BCV for female samples only
-y_female <- estimateCommonDisp(y_female,
-                               verbose = TRUE)
-y_female <- estimateTrendedDisp(y_female)
-y_female <- estimateTagwiseDisp(y_female)
-# Extract gene-wise BCV values
-gene_wise_bcv_female <- sqrt(y_female$tagwise.dispersion)
-# Create a data frame with gene names and BCV values
-bcv_table_female <- data.frame(
-  Gene = rownames(y_female),
-  BCV = gene_wise_bcv_female,
-  AveExpr = y_female$AveLogCPM
-)
-
-# save the table to a CSV file:
-# write.csv(bcv_table_female, file = output_gene_wise_bcv_results_female_file,
-# row.names = FALSE)
-
-plotBCV(y_female,
-        xlab = "Average log CPM",
-        ylab = "Biological coefficient of variation - female",
-        pch = 16,
-        cex = 0.2,
-        col.common = "red",
-        col.trend = "blue",
-        col.tagwise = "black")
-
-plot(bcv_table_male$BCV, bcv_table_female$BCV)
-
-# Density plot of the BCVs
-# Add a column to each data frame to indicate the sex
-bcv_table_male <- bcv_table_male %>%
-  mutate(sex = "male")
-
-bcv_table_female <- bcv_table_female %>%
-  mutate(sex = "female")
-
-# Combine the data frames
-bcv_combined <- bind_rows(bcv_table_male, bcv_table_female)
-
-# Create the density plot
-ggplot(bcv_combined, aes(x = BCV,
-                         fill = sex,
-                         colour = sex)) +
-  geom_density(alpha = 0.5) +
-  labs(title = "Density Plot of BCV by Fetal Sex",
-       x = "BCV",
-       y = "Density") +
-  theme_minimal()
-
-```
-
-# Estimate BCV (all samples together)
-```{r}
-dge_list_obj <- estimateCommonDisp(dge_list_obj,
-                                   verbose=TRUE)
-dge_list_obj <- estimateTrendedDisp(dge_list_obj)
-dge_list_obj <- estimateTagwiseDisp(dge_list_obj)
-# plot the BCV vs log2CPM
-plotBCV(dge_list_obj)
-
-# Extract gene-wise BCV values
-gene_wise_bcv <- sqrt(dge_list_obj$tagwise.dispersion)
-
-# Create a data frame with gene names and BCV values
-bcv_table <- data.frame(
-  Gene = rownames(dge_list_obj),
-  BCV = gene_wise_bcv,
-  AveExpr = dge_list_obj$AveLogCPM
-)
-
-# Sort the table by BCV (descending order)
-bcv_table_sorted <- bcv_table[order(-bcv_table$BCV), ]
-
-# View the top rows of the table
-head(bcv_table_sorted)
-
-# save the table to a CSV file:
-# write.csv(bcv_table_sorted, file = "gene_wise_bcv_results.csv", row.names = FALSE)
 ```
 
 # Calculate log2CPM and save table as .csv
@@ -336,11 +234,10 @@ log2CPM <- edgeR::cpm(dge_list_obj, log = TRUE)
 ```
 
 # Differential Expression
-- covariates are either  
-  - maternal age  
-  - maternal BMI  
+- covariates are cell-type proportions
+
 ```{r}
-## No covariates
+
 #Create and write out design matrix
 model_noCovariate <- '~0 + sex_outcome'
 # establish the design matrix
@@ -350,15 +247,21 @@ design_sex_PE <- model.matrix(formula(model_noCovariate),
 colnames(design_sex_PE) <- c(sex_outcome_levels)
 
 # save a csv of the design matrix
-write_csv(data.frame(design_sex_PE) %>%
-            tibble::rownames_to_column("samplename"),
-          file = outDesignMatrix_file,
-          col_names = TRUE)
+# write_csv(data.frame(design_sex_PE) %>%
+#             tibble::rownames_to_column("samplename"),
+#           file = outDesignMatrix_file,
+#           col_names = TRUE)
 ```
 
 ```{r}
 # perform the voom
 voom_sex_PE <- voom(dge_list_obj, design_sex_PE, plot = TRUE)
+
+# Check for non-estimable coefficients in the design matrix
+non_est <- nonEstimable(design_sex_PE)
+if (!is.null(non_est)) {
+  warning("Non-estimable coefficients: ", paste(non_est, collapse = ", "))
+}
 
 # fit the linear model
 fit_sex_PE <- lmFit(voom_sex_PE, design_sex_PE)
@@ -410,7 +313,7 @@ write_csv(allTable_female_PE,
           file=file.path(outdir, "allTable_female.csv"))
 
 # write_csv(allTable_female_PE,
-#           file="/media/sf_D_DRIVE/VM_Projects/20240723_compare_pre_post_dedup/allTable_female_post_dedup.csv")
+#           file="/media/sf_D_DRIVE/VM_Projects/20240723_compare_pre_post_dedup/allTable_female_post_dedup_cell_type_proportion.csv")
 
 
 # all DE results for the male comparison
@@ -422,7 +325,7 @@ write_csv(allTable_male_PE,
           file=file.path(outdir, "allTable_male.csv"))
 
 # write_csv(allTable_male_PE,
-#           file="/media/sf_D_DRIVE/VM_Projects/20240723_compare_pre_post_dedup/allTable_male_post_dedup.csv")
+#           file="/media/sf_D_DRIVE/VM_Projects/20240723_compare_pre_post_dedup/allTable_male_post_dedup_cell_type_proportion.csv")
 
 topTable_male_pe <- topTable(contrast_fit_sex_PE,
                              coef = "male_PE",
@@ -430,10 +333,6 @@ topTable_male_pe <- topTable(contrast_fit_sex_PE,
                              sort = "p",
                              p = 0.05,
                              adjust.method = "fdr")
-
-# create output files and save
-write_csv(topTable_male_pe,
-          file="/home/smit1924/preeclampsia_sex_chromosome_informed/noCovariate_output/topTable_male_pe.csv")
 
 # write out a few summary tables
 df <- left_join(allTable_female_PE %>% dplyr::select(-t, -P.Value, -B),
@@ -480,38 +379,22 @@ center_scale <- function(x) {
 row_centered_counts <- center_scale(t(dge_list_obj$counts)) %>% 
   t()
 
-# which gene would we like to plot??
-gene_to_plot <- "ENSG00000047457"
-
 # png(filename=file.path(outdir, "expression_DE_gene_CP_sexOutcome.png'), width=800, height=800)
 # Gene of Interest (GOI)
-GOI_PE_UP <- data.frame(ensbl=c("ENSG00000178726", "ENSG00000115602",
-                             "ENSG00000174697", "ENSG00000070404",
-                             "ENSG00000169495", "ENSG00000136002",
-                             "ENSG00000012223", "ENSG00000142623",
-                             "ENSG00000224658", "ENSG00000102755",
-                             "ENSG00000118849", "ENSG00000165810",
-                             "ENSG00000211448", "ENSG00000243836",
-                             "ENSG00000150722", "ENSG00000181458",
-                             "ENSG00000159399"),
-                  gene=c("THBD", "IL1RL1", "LEP", "FSTL3",
-                         "HTRA4", "ARHGEF4", "LTF", "PADI1",
-                         "RP11-631F7.1", "FLT1", "RARRES1",
-                         "BTNL9", "DIO2", "WDR86-AS1", "PPP1R1C",
-                         "TMEM45A", "HK2"),
-                  direction = "up")
+GOI_PE_UP <- data.frame(ensbl=c("ENSG00000026508", "ENSG00000134184",
+                                "ENSG00000149084", "ENSG00000163453",
+                                "ENSG00000143995", "ENSG00000091039",
+                                "ENSG00000134533"),
+                        gene=c("CD44", "GSTM1", "HSD17B12", "IGFBP7", "MEIS1", "OSBPL8", "RERG"),
+                        direction = "up")
 
-GOI_PE_male_UP <- topTable_male_pe %>%
+GOI_PE_male_UP <- allTable_male_PE %>%
   arrange(desc(logFC)) %>%
-  dplyr::select(., ensbl = ensembl_gene_id, gene = hgnc_symbol)
+  dplyr::select(., ensbl = ensembl, gene = hgnc_symbol)
 
-GOI_PE_DOWN <- data.frame(ensbl=c("ENSG00000233913", "ENSG00000134548",
-                                  "ENSG00000203859", "ENSG00000213088",
-                                  "ENSG00000114473", "ENSG00000260719",
-                                  "ENSG00000091137", "ENSG00000157064"),
-                  gene=c("RPL10P9", "SPX", "HSD3B2", "ACKR1",
-                         "IQCG", "AC009133.17", "SLC26A4", "NMNAT2"),
-                  direction = "down")
+GOI_PE_DOWN <- data.frame(ensbl=c("ENSG00000173917", "ENSG00000275993"),
+                          gene=c("HOXB2", "SIK1B"),
+                          direction = "down")
 
 GOI_UP_DOWN <- rbind(GOI_PE_UP, GOI_PE_DOWN)
 
@@ -524,8 +407,8 @@ pd <- position_dodge(width = 0.5)
 lcpm <- edgeR::cpm(dge_list_obj, log = TRUE)
 
 ## Print all of the plots at once
-for (i in 1:nrow(GOI_PE_UP)) {
-melt_lcpm <- melt(subset(lcpm, rownames(lcpm) %in% GOI_PE_UP$ensbl[i])) %>% 
+for (i in 1:nrow(GOI_PE_DOWN)) {
+melt_lcpm <- melt(subset(row_centered_counts, rownames(row_centered_counts) %in% GOI_PE_DOWN$ensbl[i])) %>% 
   as.data.frame() %>% 
   set_colnames(c("ensbl", "samplename", "log2cpm")) %>% 
   # tibble::rownames_to_column("samplename") %>% 
@@ -539,9 +422,6 @@ beeswarm <- ggplot(melt_lcpm, aes(x = Sex,
                width = 0.2) +
   geom_boxplot(width = 0.5,
                position = pd) +
-  #     geom_boxplot(aes(x = Fetal.Sex,
-  #                  y =  log2cpm,
-  #                  fill = simpleOutcome)) +
   stat_summary(fun = mean,
                geom = "point",
                size=2,
@@ -549,10 +429,19 @@ beeswarm <- ggplot(melt_lcpm, aes(x = Sex,
                position = position_dodge(0.5)) +
   geom_beeswarm(dodge.width = 0.6, cex = 2) +
   theme_bw(base_size = 18) +
-  ylab(paste("log2 CPM Counts", GOI_PE_UP$ensbl[i], GOI_PE_UP$gene[i], sep = " - ")) +
+  ylab(paste("Centered and Scaled Counts", GOI_PE_DOWN$ensbl[i], GOI_PE_DOWN$gene[i], sep = " - ")) +
   theme(axis.text.x = element_text(colour = "black")) +
-  theme(legend.position = "bottom")
+  theme(legend.position = "bottom") +
+      geom_text_repel(data = subset(melt_lcpm, Outcome == "PE" & Sex == "M"),
+                    aes(label = samplename),
+                    nudge_y = 0.2,
+                    size = 3)
 print(beeswarm)
+
+  # Save the plot
+  filename <- paste("/media/sf_D_DRIVE/VM_Projects/20240619_deduplicateBams/plots/Scatter_and_Box_Plot", GOI_PE_DOWN$ensbl[i], GOI_PE_DOWN$gene[i], ".png", sep = "_")
+  ggsave(filename, plot = beeswarm, units = "in", width = 12, height = 12, dpi = 300)
+  
 }
 
 # graphics.off()
@@ -622,7 +511,7 @@ volcano_male <- ggplot(data = FDR_FC_Decide,
   theme(legend.position="bottom")
 
 ggsave(plot = volcano_male,
-       filename = file.path(projectDir, "deduplicated_clearBox/output/volcano_male.png"),
+       filename = file.path(outdir, "volcano_male.png"),
        units = "in",
        width = 12,
        height = 12,
@@ -694,7 +583,7 @@ volcano_female <- ggplot(data = FDR_FC_Decide,
   theme(legend.position="bottom")
 
 ggsave(plot = volcano_female,
-       filename = file.path(projectDir, "noCovariate_output/volcano_female.pdf"),
+       filename = file.path(outdir, "volcano_female.png"),
        units = "in",
        width = 12,
        height = 12,
@@ -715,20 +604,20 @@ callback = function(hc, mat){
 annotation_cols <- metadata[, c("samplename", "Sex", "Outcome")] %>%
   tibble::column_to_rownames("samplename")
 
-scaled_exp <- scale(t(subset(log2CPM, rownames(log2CPM) %in% dplyr::filter(FDR_FC_Decide, threshold == 1)$ensembl_gene_id)))
+scaled_exp <- scale(t(subset(log2CPM, rownames(log2CPM) %in% dplyr::filter(FDR_FC_Decide, threshold == 1)$ensembl)))
 
-# png(file=file.path(outdir, "heatmap_scaled_sig_AdjPVal_M.png"),
-#     width=12,
-#     height=8,
-#     units = "in",
-#     res = 150)
+png(file=file.path(outdir, "heatmap_scaled_sig_AdjPVal_M.png"),
+    width=12,
+    height=8,
+    units = "in",
+    res = 150)
 pheatmap(t(scaled_exp),
          annotation_col = annotation_cols,
          show_rownames = FALSE,
          show_colnames = TRUE,
          cutree_cols = 3,
          clustering_callback = callback)
-# dev.off()
+dev.off()
 
 ```
 
