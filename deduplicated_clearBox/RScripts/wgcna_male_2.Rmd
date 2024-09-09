@@ -1,0 +1,535 @@
+---
+title: "wgcna"
+author: "Melanie Smith"
+date: "25 August 2024"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+# Load Libraries
+This script is based on the tutorial found here https://github.com/Lindseynicer/WGCNA_tutorial/blob/main/WGCNA_tutorial_Rscript
+
+
+```{r}
+library(WGCNA)
+library(tidyverse)
+library(GEOquery)
+library(CorLevelPlot) #devtools::install_github("kevinblighe/CorLevelPlot")
+library(gridExtra)
+library(edgeR)
+
+allowWGCNAThreads()
+
+```
+
+# Set directories and paths
+
+```{r}
+# set project directory
+projectDir <- "/home/smit1924/preeclampsia_sex_chromosome_informed"
+# projectDir <- "/Users/pillmaka/Desktop/Melanie/drive-download"
+
+# input files
+counts <- file.path(projectDir, "deduplicated_clearBox/readCounts/deduplicated_s2_readCounts.txt")
+metadata_file <- file.path(projectDir, "clearBoxRawData/cleanSampleMetadata.csv")
+input_allTable_male <- file.path(projectDir, "deduplicated_clearBox/output/58_sample_noCovariate/allTable_male.csv")
+
+gene_info_file <- file.path(projectDir, "clearBoxCleanData/gencode_v29_gene_id_symbol_chr_biotype.csv")
+
+# set the output directory
+outdir <- file.path(projectDir, "deduplicated_clearBox/output/wgcna")
+
+# set figure files
+output_hclust_tree_file <- file.path(outdir, "hclust_tree.png")
+output_pca_dim1_dim2_file <- file.path(outdir, "pca_dim1_dim2.png")
+output_softpower_file <- file.path(outdir, "softPower.png")
+output_blockwiseModuleDendrogram_file <- file.path(outdir, "blockwiseModuleDendrogram.png")
+output_stepByStepDendrogram_file <- file.path(outdir, "stepByStepDendrogram.png")
+output_stepByStepDendrogramModules_file <- file.path(outdir, "stepByStepDendrogramModules.png")
+output_stepByStepDendrogramModulesMerged_file <- file.path(outdir, "stepByStepDendrogramModulesMerged.png")
+output_oldMEs_file <- file.path(outdir, "oldMEs.txt")
+output_newMEs_file <- file.path(outdir, "newMEs.txt")
+output_eigengene_sample_heatmap_file <- file.path(outdir, "eigengene_sample_heatmap.png")
+output_eigengene_sample_heatmap_file
+```
+
+# Import all input data tables
+## sample metadata
+```{r}
+
+## Metadata
+metadata <- read_csv(file = metadata_file)
+# Filter metadata to exclude samples where Sex = "F"
+filtered_metadata <- metadata %>%
+  filter(Sex != "F")
+
+```
+
+## Gene info file
+```{r}
+## Gene ID versus GeneSymbol
+gene_info <- read_csv(file = gene_info_file)
+gene_info <- gene_info[!duplicated(gene_info$ensembl_gene_id), ]
+```
+
+## DE genes
+```{r}
+allTable_male <- read_csv(input_allTable_male) %>%
+  dplyr::filter(., adj.P.Val <= 0.2)
+```
+
+## Raw Counts
+```{r}
+# import the counts table
+# counts are annotated to GRCh38
+rawCounts_deduplicated <- read.delim(file = counts)
+# tidy up the column names
+colnames(rawCounts_deduplicated) <- gsub("X.media.sf_D_DRIVE.VM_Projects.20240619_deduplicateBams.deduplicated_data.|_marked_duplicates.bam|_T.*|_",
+                                 "",
+                                 colnames(rawCounts_deduplicated))
+
+# # clean up the rownames - the are still in the 'ensembl + version' nomenclature
+# counts <- dplyr::left_join(rawCounts_deduplicated %>% tibble::rownames_to_column("ensembl_gene_id"), gene_info %>% dplyr::select(., ensembl_gene_id, ensembl), by = "ensembl_gene_id") %>%
+#   # subset the raw counts to only include the top 80% of DE genes
+#   dplyr::filter(ensembl %in% allTable_male$ensembl) %>%
+#   dplyr::select(., -ensembl_gene_id) %>%
+#   tibble::column_to_rownames("ensembl") %>%
+#   # drop female columns
+#   dplyr::select(., filtered_metadata$samplename)
+```
+
+# Establish DGElist object
+
+```{r}
+# drop the samples not required for this analysis
+counts <- rawCounts_deduplicated %>%
+  tibble::column_to_rownames("Geneid")
+# ensure the counts and metadata are in the same order
+counts <- counts[, metadata$samplename]
+
+# drop rows with zero in all columns
+counts <- counts[rowSums(counts[])>0,] %>%
+  tibble::rownames_to_column("ensembl_gene_id")
+
+# add the hgnc gene symbol, chromosome and biotype to the counts matrix
+counts_hgnc <- dplyr::left_join(counts, gene_info, by = "ensembl_gene_id") %>%
+  dplyr::select(., ensembl_gene_id, ensembl, hgnc_symbol, seqnames, gene_type, everything())
+dim(counts_hgnc) # 43423 63
+
+# drop rows with NAs introduced in the join
+counts_hgnc_clean <- counts_hgnc %>%
+  filter(!is.na(ensembl))
+dim(counts_hgnc_clean) # 42645 63
+
+# establish the DGEList
+dge_list_obj <- edgeR::DGEList(counts = counts_hgnc_clean %>%
+                          tibble::column_to_rownames("ensembl") %>%
+                          dplyr::select(., -hgnc_symbol, -ensembl_gene_id, -seqnames, -gene_type),
+                        samples = metadata,
+                        group = metadata$group,
+                        genes = counts_hgnc_clean %>% dplyr::select(ensembl, hgnc_symbol, seqnames, gene_type))
+
+```
+
+# Filter biological noise
+
+```{r}
+
+# new df of unfiltered cpm for the reduced DGEList
+preFilterCPM <- edgeR::cpm(dge_list_obj)
+
+# remove low expressed genes (filterCPM in numSamples PE)
+keep.exprs <- rowSums(preFilterCPM > 2) >= 5
+
+# Perform the filtering step and recalculate the TMM normalisation factors for each library.
+dge_list_obj <- dge_list_obj[keep.exprs,,keep.lib.sizes = FALSE]
+
+dim(dge_list_obj)
+
+```
+
+# TMM normalisation
+
+```{r}
+# calculate normalisation factors and apply to the DGEList object
+dge_list_obj <- edgeR::calcNormFactors(dge_list_obj,
+                                method = "TMM")
+
+# # set the new factor levels
+sex_outcome_levels <- c("F_Control", "M_Control", "F_PE", "M_PE")
+dge_list_obj$samples$sex_outcome <- factor(dge_list_obj$samples$sex_outcome, levels=sex_outcome_levels)
+
+```
+
+# Keep only male samples
+
+```{r}
+male_dgeList <- dge_list_obj[dge_list_obj$genes$ensembl %in% allTable_male$ensembl, dge_list_obj$samples$samplename %in% filtered_metadata$samplename]
+```
+
+## Genes and Samples driving variability
+- create a distance matrix to determine which samples are more closely related.  
+- Samples that are clustered together in the heatmap are more similar to each other in terms of their gene expression profiles.  
+- Sample gene expression does not cluster on outcome or gestational age.  
+- STP0148 and SCP4157 appear to be more similar to each other than to any other samples.  
+
+```{r figure 1 - sample distances, fig.width = 7, fig.height = 5}
+
+lcpm <- edgeR::cpm(male_dgeList, log = TRUE)
+sampleDists <- dist(t(lcpm))
+sampleDistMatrix <- as.matrix(sampleDists)
+
+annotation_row <- data.frame(gestationalAge = as.integer(male_dgeList$samples$GestationalAge),
+                             outcome = male_dgeList$samples$Outcome)
+
+rownames(annotation_row) <- male_dgeList$samples$samplename
+
+pheatmap::pheatmap(sampleDistMatrix,
+         annotation_col = annotation_row,
+         cutree_rows = 4,
+         cutree_cols = 4,
+         show_rownames = TRUE,
+         main = "Sample v Sample correlation")
+
+```
+
+## Create a sample-sample network
+One of the first things we can do is to see if we have samples that cluster and whether these clusters associate with our traits of interest.  
+
+```{r sample sample network}
+
+# Create an adjacency matrix of log2 transformed counts (squared Euclidean distance)
+# counts need to be samples in columns and genes in rows for this
+adjacency <- WGCNA::adjacency(edgeR::cpm(male_dgeList,
+                                         log = TRUE),
+                              type = "distance")
+
+#calculate the whole network connectivity
+k <- as.numeric(apply(adjacency,2,sum))-1
+# standardise connectivity
+Z.k <- scale(k)
+
+# Designate samples as outlying if their Z.k value is below threshold
+thresholdZ.k <- -2.5 # often -2.5 - indicates standard deviations away from other samples when is outlier
+
+# colour the vector indicating outliers
+outlierColour <- ifelse(Z.k < thresholdZ.k, "red", "black")
+
+# calculate the cluster tree using flashClust
+## dis-similarity matrix calculated as 1-adjacency matrix
+sampleTree <- flashClust::flashClust(as.dist(1-adjacency),
+                     method = "average")
+
+# convert traits to colour representation
+# where red indicates high values
+# create an object of the sample metadata
+samples <- male_dgeList$samples %>%
+  # remove unwanted columns
+  dplyr::select(., -norm.factors,
+                -samplename,
+                -deliveryMode,
+                -reportedOutcome,
+                -group.1,
+                -group,
+                -Outcome,
+                -Sex
+)
+
+# convert characters to factors and set factor levels
+samples$cohort <- factor(samples$cohort, c("SCOPE", "STOP"))
+samples$SmokingStatus <- factor(samples$SmokingStatus, c("N", "Y"))
+samples$Ethnicity <- factor(samples$Ethnicity, c("Caucasian",
+                                                 "Aboriginal",
+                                                 "SouthEastAndFarEast",
+                                                 "Asian",
+                                                 "Polynesian"))
+samples <- samples %>%
+  # convert factors to numeric for colour assignment
+  mutate_if(is.factor, as.numeric)
+
+# convert numbers to colours
+traitColours <- data.frame(numbers2colors(samples, signed = FALSE))
+dimnames(traitColours)[[2]] <- paste(names(samples), "C", sep = "")
+datColours <- data.frame(outlierC = outlierColour, traitColours)
+
+# Plot the sample dendrogram and the colours underneath
+WGCNA::plotDendroAndColors(sampleTree,
+                    groupLabels = names(datColours),
+                    colors = datColours,
+                    main = "Sample Dendrogram and Heatmap")
+
+
+
+```
+
+## 1. Network Construction
+
+Prior to identifying which genes are correlated with each other, need to select a soft power threshold
+
+The first step in constructing a scale-free gene co-expression requires choosing a soft-thresholding power. 
+
+Here, we test a range of possible soft-thresholding powers to find the minimum one which results in approximately [scale-free topology](https://en.wikipedia.org/wiki/Scale-free_network) for the male and female gene expression networks. We define an appropriate minimum scale-free topology fitting index *R<sup>2</sup>* to be at least 0.20 (80% confidence). This step takes a couple of mins to run. 
+
+```{r Choose-Soft-Thresholding-Power, message=FALSE, warning=FALSE}
+
+# 1. Normalize the counts to CPM (log-transformed)
+lcpm <- edgeR::cpm(male_dgeList, log = TRUE)
+
+# 2. Transpose the data for WGCNA (genes should be in columns, samples in rows)
+datExpr <- t(lcpm)
+
+# 3. Check for good genes and samples (optional but recommended)
+gsg <- goodSamplesGenes(datExpr, verbose = 3)
+if (!gsg$allOK) {
+  datExpr <- datExpr[gsg$goodSamples, gsg$goodGenes]
+}
+
+# 4. Run the pickSoftThreshold function to choose an appropriate power
+powers <- c(seq(1, 10,by = 1),
+            seq(12, 30, by = 2))  # Define a range of soft-thresholding powers
+sft <- pickSoftThreshold(datExpr,
+                         powerVector = powers,
+                         verbose = 5)
+
+# 5. Inspect the results
+print(sft)
+
+# Plot the results (optional)
+plot(sft$fitIndices[,1], -sign(sft$fitIndices[,3])*sft$fitIndices[,2],
+     xlab = "Soft Threshold (power)", ylab = "Scale Free Topology Model Fit, signed R^2",
+     type = "n", main = "Scale independence")
+text(sft$fitIndices[,1], -sign(sft$fitIndices[,3])*sft$fitIndices[,2],
+     labels = powers, cex = 0.9, col = "red")
+abline(h = 0.90, col = "red")  # Threshold for selecting a suitable power
+
+```
+
+The `pickSoftThreshold` function suggests the most appropriate soft-thresholding power to be used in network construction. `r sft$powerEstimate` is the soft-thresholding power suggested.
+
+Next the adjacency matrix will be created for the formation of the gene co-expression network
+
+:   The **adjacency matrix** is a matrix that where the genes are both the columns and rows and the matrix is filled with the correlation value between each pair of genes.
+
+In developing a network, the direction of the correlation of genes is important. The stringency applied when identifying biologically significant modules will increase by only identifying those genes which are positively correlated with one another.
+
+# Create Topological Overlap Matrix
+```{r}
+# make sure we pull cor() from the WGCNA name space
+cor <- WGCNA::cor
+
+# set the soft power identified earlier
+power <- sft$powerEstimate
+
+## Option 1: use the blockwise "automatic" module creation. This can be faster when running large datasets but does limit some of our choices. I'll run it and take a look but will likely go ahead with the step-by-step module creation for this smaller dataset.
+net <- blockwiseModules(datExpr,
+                        TOMType = "signed",
+                        power = power,
+                        minModuleSize = 30,
+                        reassignThreshold = 0,
+                        mergeCutHeight = 0.25,
+                        numericLabels = TRUE,
+                        pamRespectsDendro = FALSE,
+                        saveTOMs = FALSE,
+                        verbose = 3)
+
+# return the cor() function to default
+cor <- stats::cor
+
+# Plot the blockwise modules
+sizeGrWindow(12, 9)
+mergedColors <- labels2colors(net$colors)
+png(file = output_blockwiseModuleDendrogram_file,
+    width = 12,
+    height = 6,
+    units = "in",
+    res = 150)
+plotDendroAndColors(net$dendrograms[[1]], mergedColors[net$blockGenes[[1]]],
+                    "Module Colours",
+                    dendroLabels = FALSE,
+                    hang = 0.03,
+                    addGuide = TRUE,
+                    guideHang = 0.05)
+dev.off()
+
+## Option 2: step-by-step
+# create the adjacency matrix: Adjacency Matrix: Represents how strongly genes are connected to each other based on their expression.
+# The adjacency matrix represents the pairwise connection strength between genes based on their expression levels. The adjacency function applies the power transformation to the correlation matrix of the expression data, raising the correlations to the specified power to emphasize stronger correlations and reduce weaker correlations. This is essential for network construction in WGCNA.
+# The resulting adjacency matrix has values between 0 and 1, representing the strength of connections between genes.
+adjacency <- adjacency(datExpr,
+                       power = power)
+# Calculate the Topological Overlap Matrix (TOM): TOM: Refines these connections by considering shared neighbors (i.e., indirect connections between genes).
+# The TOM measures the interconnectedness of genes by considering not only the direct correlation between two genes but also the genes they are connected to. Genes with a high TOM value are part of a tightly connected network or module.
+# The TOM matrix refines the adjacency matrix by identifying modules of genes that are highly interconnected.
+# The TOM matrix, like the adjacency matrix, contains values between 0 and 1. Higher values in the TOM matrix indicate stronger connections between genes in terms of their shared neighbors in the network.
+TOM <- TOMsimilarity(adjacency)
+# Calculate the dissimilarity matrix (or distance matrix) based on the TOM. Dissimilarity Matrix (dissTOM): Converts the TOM into a distance measure, which is used for clustering genes into co-expression modules
+dissTOM <- 1-TOM
+dim(dissTOM)
+
+# Construct modules: cluster genes into co-expression modules
+geneTree <- hclust(as.dist(dissTOM),
+                   method = "average")
+# plot the step-by-step modules
+# png(file = output_stepByStepDendrogram_file,
+#     width = 12,
+#     height = 6,
+#     units = "in",
+#     res = 150)
+plot(geneTree,
+     xlab="",
+     sub="",
+     main="Gene Clustering on TOM-based dissimilarity matrix",
+     labels = FALSE,
+     hang = 0.04)
+# dev.off()
+
+# Module identification using dynamic tree cut
+dynamicModules <- cutreeDynamic(dendro = geneTree,
+                                distM = dissTOM,
+                                deepSplit = 4,
+                                pamRespectsDendro = FALSE,
+                                minClusterSize = 30)
+table(dynamicModules)
+# how many modules do we have?
+length(table(dynamicModules))
+
+# convert numeric labels into colours
+dynamicColours <- labels2colors(dynamicModules)
+table(dynamicColours)
+
+# plot dendrogram with colour modules
+# png(file = output_stepByStepDendrogramModules_file,
+#     width = 12,
+#     height = 6,
+#     units = "in",
+#     res = 150)
+plotDendroAndColors(geneTree,
+     dynamicColours,
+     "Dynamic Tree Cut",
+     dendroLabels = FALSE,
+     hang = 0.03,
+     addGuide = TRUE,
+     guideHang = 0.05,
+     main = "Gene Dendrogram")
+# dev.off()
+
+# Merge Modules
+## Calculate Eigengenes
+MEList <- moduleEigengenes(datExpr,
+                           colors = dynamicColours)
+MEs <- MEList$eigengenes
+# Calculate dissimilarity of eigengenes
+MEDiss <- 1-cor(MEs)
+# Cluster module eigengenes
+METree <- hclust(as.dist(MEDiss),
+                 method = "average")
+# Plot the result
+plot(METree,
+     main = "Clustering of Module Eigengenes",
+     xlab = "",
+     sub = "")
+# Merge similar modules
+MEDissThreshold <- 0.10
+abline(h = MEDissThreshold, col = "red")
+merge <- mergeCloseModules(datExpr,
+                           dynamicColours,
+                           cutHeight = MEDissThreshold,
+                           verbose = 3)
+mergedColours <- merge$colors  
+mergedMEs <- merge$newMEs  
+# Plot merged module tree
+# png(file = output_stepByStepDendrogramModulesMerged_file,
+#     width = 12,
+#     height = 6,
+#     units = "in",
+#     res = 150)
+plotDendroAndColors(geneTree, cbind(dynamicColours, mergedColours), 
+                    c("Dynamic Tree Cut", "Merged Dynamic"),
+                    dendroLabels = FALSE, 
+                    hang = 0.03,
+                    addGuide = TRUE,
+                    guideHang = 0.05)  
+# dev.off()
+write.table(merge$oldMEs,file=output_oldMEs_file)
+write.table(merge$newMEs,file=output_newMEs_file)
+
+```
+# Export network data for cytoscape
+```{r}
+# Export the gene list of old modules 
+for (i in 1:length(merge$oldMEs)){
+  modules = c(substring(names(merge$oldMEs)[i], 3));
+  genes = colnames(datExpr)
+  inModule = is.finite(match(dynamicColours,modules))
+  modGenes = genes[inModule]
+  modTOM=TOM[inModule,inModule]
+  dimnames(modTOM)=list(modGenes,modGenes)
+  cyt = exportNetworkToCytoscape(modTOM,
+                                 edgeFile = paste(outdir, "/orign_CytoscapeInput-edges-", paste(modules, collapse="-"), ".txt", sep=""),
+                                 nodeFile = paste(outdir, "/orign_CytoscapeInput-nodes-", paste(modules, collapse="-"), ".txt", sep=""),
+                                 weighted = TRUE, threshold = -1, nodeNames = modGenes, nodeAttr = dynamicColours[inModule]);
+}
+
+# Export the gene list of new modules 
+for (i in 1:length(merge$newMEs)){
+  modules = c(substring(names(merge$newMEs)[i], 3));
+  genes = colnames(datExpr)
+  inModule = is.finite(match(dynamicColours,modules))
+  modGenes = genes[inModule]
+  modTOM=TOM[inModule,inModule]
+  dimnames(modTOM)=list(modGenes,modGenes)
+  cyt = exportNetworkToCytoscape(modTOM,
+                                 edgeFile = paste(outdir, "/merge_CytoscapeInput-edges-", paste(modules, collapse="-"), ".txt", sep=""),
+                                 nodeFile = paste(outdir, "/merge_CytoscapeInput-nodes-", paste(modules, collapse="-"), ".txt", sep=""),
+                                 weighted = TRUE, threshold = -1, nodeNames = modGenes, nodeAttr = dynamicColours[inModule]);
+}
+```
+
+# Correlate module eigen-genes and samples (or other discrete data)
+
+```{r}
+# Heatmap of old module eigen-genes and samples
+#pdf(file="oldMEs.pdf",heigh=80,width=20)
+library("pheatmap")
+pheatmap(merge$oldMEs,
+         cluster_col=TRUE,
+         cluster_row=TRUE,
+         show_rownames=TRUE,
+         show_colnames=TRUE,
+         fontsize=6)
+dev.off()
+
+
+# Heatmap of new module eigen-genes and sample trait (e.g. Zone)
+col_ann <- filtered_metadata[,c("samplename", "GestationalAge", "BMI", "maternalAge", "sex_outcome")] %>%
+  tibble::column_to_rownames("samplename")
+col_ann <- data.frame(col_ann)
+col_ann$sex_outcome <- as.factor(col_ann$sex_outcome)
+head(col_ann)
+
+# pull the module eigengene "expression" from the merged modules
+data <- data.frame(merge$newMEs)
+data <- data[order(match(rownames(data), rownames(col_ann))),]
+dim(merge$newMEs)
+
+# png(file = output_eigengene_sample_heatmap_file,
+#     width = 12,
+#     height = 6,
+#     units = "in",
+#     res = 150)
+pheatmap(data,
+         cluster_col=TRUE,
+         cluster_row=TRUE,
+         cutree_rows = 4,
+         show_rownames=TRUE,
+         show_colnames=TRUE,
+         fontsize=6,
+         annotation_row = col_ann)
+# dev.off()
+```
+
+
+
