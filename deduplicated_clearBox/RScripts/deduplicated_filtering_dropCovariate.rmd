@@ -349,11 +349,11 @@ design_sex_PE <- model.matrix(formula(model_noCovariate),
 # make the column names a little nicer
 colnames(design_sex_PE) <- c(sex_outcome_levels)
 
-# save a csv of the design matrix
-write_csv(data.frame(design_sex_PE) %>%
-            tibble::rownames_to_column("samplename"),
-          file = outDesignMatrix_file,
-          col_names = TRUE)
+# # save a csv of the design matrix
+# write_csv(data.frame(design_sex_PE) %>%
+#             tibble::rownames_to_column("samplename"),
+#           file = outDesignMatrix_file,
+#           col_names = TRUE)
 ```
 
 ```{r}
@@ -363,6 +363,33 @@ voom_sex_PE <- voom(dge_list_obj, design_sex_PE, plot = TRUE)
 # fit the linear model
 fit_sex_PE <- lmFit(voom_sex_PE, design_sex_PE)
 ```
+
+## allTable and residuals for n=58 
+
+```{r}
+# perform bayesian adjustment
+fit_sex_PE <- eBayes(fit_sex_PE)
+
+# check the coefficients
+full_model_coefficients <- fit_sex_PE$coefficients
+saveRDS(full_model_coefficients,
+        file = file.path(outdir, "full_model_coefficients.rds"))
+dim(full_model_coefficients)
+
+# summary table of the sex PE fit
+summary(decideTests(fit_sex_PE,
+                    adjust.method = "fdr",
+                    p.value = 0.05))
+
+# all DE results for the female_PE comparison
+allTable_PE <- topTable(fit_sex_PE,
+                             # coef = "female_PE",
+                             n = Inf,
+                             sort = "none")
+
+```
+
+## Sex-specific contrast, fit and residuals
 
 ```{r}
 # set the contrasts - this makes it easier to "see" what we're testing
@@ -436,6 +463,17 @@ write_csv(topTable_male_pe,
           file="/home/smit1924/preeclampsia_sex_chromosome_informed/noCovariate_output/topTable_male_pe.csv")
 
 # write out a few summary tables
+
+# Count occurrences for both conditions in a single pipeline
+seqname_counts <- allTable_male %>%
+  dplyr::filter(., adj.P.Val < 0.05) %>%
+  mutate(condition = ifelse(logFC < 0, "down", "up")) %>%
+  group_by(seqnames, condition) %>%
+  summarise(count = n(), .groups = "drop")
+
+# View the result
+print(seqname_counts)
+
 df <- left_join(allTable_female_PE %>% dplyr::select(-t, -P.Value, -B),
                allTable_male_PE %>% dplyr::select(-t, -P.Value, -B),
                by=c('hgnc_symbol', 'ensembl'),
@@ -712,23 +750,41 @@ callback = function(hc, mat){
     as.hclust(dend)
 }
 
+males <- dplyr::filter(dge_list_obj$samples, Sex == "M")
+
 annotation_cols <- metadata[, c("samplename", "Sex", "Outcome")] %>%
-  tibble::column_to_rownames("samplename")
+  tibble::column_to_rownames("samplename") %>%
+  dplyr::filter(., Sex == "M")
 
-scaled_exp <- scale(t(subset(log2CPM, rownames(log2CPM) %in% dplyr::filter(FDR_FC_Decide, threshold == 1)$ensembl_gene_id)))
+annotation_rows <- topTable_male_pe %>%
+  dplyr::mutate(foldChange = dplyr::case_when(
+    logFC > 0 ~ "up",
+    logFC < 0 ~ "down"
+  )) %>%
+  dplyr::select(., foldChange)
+# Define the color palette for row annotations
+annotation_colors <- list(
+  foldChange = c("down" = "red", "up" = "green")
+)
 
-# png(file=file.path(outdir, "heatmap_scaled_sig_AdjPVal_M.png"),
-#     width=12,
-#     height=8,
-#     units = "in",
-#     res = 150)
-pheatmap(t(scaled_exp),
+scaled_exp <- scale(t(subset(log2CPM, rownames(log2CPM) %in% dplyr::filter(FDR_FC_Decide, threshold == 1)$ensembl)))
+scaled_male <- subset(scaled_exp, rownames(scaled_exp) %in% males$samplename)
+
+png(file=file.path(outdir, "heatmap_scaled_sig_AdjPVal_M.png"),
+    width=12,
+    height=8,
+    units = "in",
+    res = 150)
+pheatmap(t(scaled_male),
          annotation_col = annotation_cols,
+         annotation_row = annotation_rows,
+         annotation_colors = annotation_colors,
          show_rownames = FALSE,
          show_colnames = TRUE,
          cutree_cols = 3,
+         treeheight_row = FALSE,
          clustering_callback = callback)
-# dev.off()
+dev.off()
 
 ```
 
