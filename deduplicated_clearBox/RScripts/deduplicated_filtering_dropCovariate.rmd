@@ -788,6 +788,67 @@ dev.off()
 
 ```
 
+## Prepare and save the rank file data for GSEA
+### Female
+
+```{r}
+
+# Import female DE table
+allTable_female <- read_csv(file.path(outdir, "allTable_female.csv"))
+
+
+allTable_female["rank"] <- (sign(allTable_female$logFC))*(-log(allTable_female$adj.P.Val, 10))
+rankFile_female <- dplyr::select(allTable_female, hgnc_symbol, rank) %>%
+  arrange(., rank)
+
+# write out the table ready for GSEAe
+write.table(rankFile_female,
+            file = file.path(outdir, "PE_female_rankFile.rnk"),
+            sep = "\t", 
+            row.names = FALSE,
+            col.names = TRUE,
+            quote = FALSE)
+
+write.table(rankFile_female,
+            file = file.path("/media/sf_D_DRIVE/VM_Projects/preeclampsia_sex_chromosome_informed/PE_female_rankFile.rnk"),
+            sep = "\t", 
+            row.names = FALSE,
+            col.names = TRUE,
+            quote = FALSE)
+
+
+```
+
+### Male
+
+```{r}
+
+# Import male DE table
+allTable_male <- read_csv(file.path(outdir, "allTable_male.csv"))
+
+
+allTable_male["rank"] <- (sign(allTable_male$logFC))*(-log(allTable_male$adj.P.Val, 10))
+rankFile_male <- dplyr::select(allTable_male, hgnc_symbol, rank) %>%
+  arrange(., rank)
+
+# write out the table ready for GSEAe
+write.table(rankFile_male,
+            file = file.path(outdir, "PE_male_rankFile.rnk"),
+            sep = "\t", 
+            row.names = FALSE,
+            col.names = TRUE,
+            quote = FALSE)
+
+write.table(rankFile_male,
+            file = file.path("/media/sf_D_DRIVE/VM_Projects/preeclampsia_sex_chromosome_informed/PE_male_rankFile.rnk"),
+            sep = "\t", 
+            row.names = FALSE,
+            col.names = TRUE,
+            quote = FALSE)
+
+
+```
+
 # Session information
 ```{r session info}
 
