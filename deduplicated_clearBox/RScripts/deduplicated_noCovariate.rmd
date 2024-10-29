@@ -1,0 +1,326 @@
+---
+title: "clearBoxDE - post deduplication"
+author: "Melanie Smith"
+date: "25 October 2024"
+output: html_document
+---
+
+# Load required libraries
+```{r load Libraries}
+library(plyr)
+library(reshape2)
+library(dplyr)
+library(stringr)
+library(edgeR)
+library(readxl)
+library(readr)
+library(magrittr)
+library(tibble)
+library(ggplot2)
+library(ggbeeswarm)
+library(ggrepel)
+library(pheatmap)
+
+# set project directory
+projectDir <- "/home/smit1924/preeclampsia_sex_chromosome_informed"
+# projectDir <- "/Users/pillmaka/Desktop/Melanie/drive-download"
+
+# input files
+counts_geneID_file <- file.path(projectDir, "deduplicated_clearBox/readCounts/deduplicated_s2_readCounts.txt")
+
+gene_info_file <- file.path(projectDir, "clearBoxCleanData/gencode_v29_gene_id_symbol_chr_biotype.csv")
+metadata_file <- file.path(projectDir, "clearBoxRawData/cleanSampleMetadata.csv")
+
+# set the output directory
+outdir <- file.path(projectDir, "deduplicated_clearBox/output/58_sample_noCovariate")
+
+# output files
+outDesignMatrix_file <- file.path(outdir, "sexAgnostic_designMatrix.csv")
+output_spreadsheet_file <- file.path(outdir, "sexAgnostic_allTable.csv")
+output_pValue_file <- file.path(outdir, "sexAgnostic_pValue_DE.csv")
+
+dir.create(outdir)
+
+# set max digits
+options(digits=3)
+
+# set filtering criteria
+filterCPM <- 2
+numSamples <- 5
+
+```
+
+# Import all input data tables
+## Raw Counts
+```{r}
+# import the counts table
+# counts are annotated to GRCh38
+rawCounts_deduplicated <- read.delim(file = counts_geneID_file) %>%
+  as.data.frame()
+# tidy up the column names
+colnames(rawCounts_deduplicated) <- gsub("X.media.sf_D_DRIVE.VM_Projects.20240619_deduplicateBams.deduplicated_data.|_marked_duplicates.bam|_T.*|_",
+                                 "",
+                                 colnames(rawCounts_deduplicated))
+
+```
+
+## Gene information and sample metadata
+```{r}
+
+## Metadata
+metadata <- read_csv(file = metadata_file)
+
+## Gene ID versus GeneSymbol
+gene_info <- read_csv(file = gene_info_file)
+
+## Gene ID versus GeneSymbol
+gene_info <- read_csv(file = gene_info_file)
+gene_info <- gene_info[!duplicated(gene_info$ensembl_gene_id), ]
+
+```
+
+# Plot the raw library sizes
+
+```{r}
+data.frame(colSums(rawCounts_deduplicated[, -1])) %>%
+  rename(lib.size = colSums.rawCounts_deduplicated....1..) %>%
+  tibble::rownames_to_column("samplename") %>%
+  mutate(color = case_when(
+    lib.size < 5000000 ~ "red",
+    lib.size >= 5000000 & lib.size < 10000000 ~ "blue",
+    lib.size >= 10000000 ~ "darkgreen"
+  )) %>%
+  dplyr::filter(!samplename %in% c("SCP3492", "SCP4010", "SCP4060")) %>%
+  ggplot(aes(x = reorder(samplename, -lib.size), y = lib.size, fill = color)) +
+  geom_bar(stat = "identity") +
+  geom_hline(yintercept = 5000000, linetype = "dashed", color = "red") +
+  geom_hline(yintercept = 10000000, linetype = "dashed", color = "darkgreen") +
+  labs(y = "Library size (total number of mapped and quantified reads)",
+       x = "Samplename") +
+  scale_fill_identity() +
+  coord_flip() +
+  ggtitle("Deduplicated Library Size")
+# ggsave(filename = output_librarySize_file,
+#        width = 7,
+#        height = 7,
+#        units = "in",
+#        dpi = 150)
+
+```
+
+# Establish DGElist object
+
+```{r}
+# drop the samples not required for this analysis
+counts <- rawCounts_deduplicated %>%
+  tibble::column_to_rownames("Geneid")
+counts <- counts[, metadata$samplename]
+
+# drop rows with zero in all columns
+counts <- counts[rowSums(counts[])>0,] %>%
+  tibble::rownames_to_column("ensembl_gene_id")
+
+# add the hgnc gene symbol, chromosome and biotype to the counts matrix
+counts_hgnc <- dplyr::left_join(counts, gene_info, by = "ensembl_gene_id") %>%
+  dplyr::select(., ensembl_gene_id, ensembl, hgnc_symbol, seqnames, gene_type, everything())
+dim(counts_hgnc) # 43423 63
+
+# drop rows with NAs introduced in the join
+counts_hgnc_clean <- counts_hgnc %>%
+  filter(!is.na(ensembl))
+dim(counts_hgnc_clean) # 42645 63
+
+# establish the DGEList
+dge_list_obj <- DGEList(counts = counts_hgnc_clean %>%
+                          tibble::column_to_rownames("ensembl") %>%
+                          dplyr::select(., -hgnc_symbol, -ensembl_gene_id, -seqnames, -gene_type),
+                        samples = metadata,
+                        group = metadata$group,
+                        genes = counts_hgnc_clean %>% dplyr::select(ensembl, hgnc_symbol, seqnames, gene_type))
+
+```
+
+# Filter biological noise and plot
+
+```{r}
+
+# new df of unfiltered cpm for the reduced DGEList
+preFilterCPM <- cpm(dge_list_obj)
+
+# remove low expressed genes (filterCPM in numSamples PE)
+keep.exprs <- rowSums(preFilterCPM > filterCPM) >= numSamples
+
+# Perform the filtering step and recalculate the TMM normalisation factors for each library.
+dge_list_obj <- dge_list_obj[keep.exprs,,keep.lib.sizes = FALSE]
+
+dim(dge_list_obj)
+
+```
+
+# TMM normalisation
+```{r}
+# calculate normalisation factors and apply to the DGEList object
+dge_list_obj <- calcNormFactors(dge_list_obj,
+                                method = "TMM")
+
+# # set the new factor levels
+sex_outcome_levels <- c("F_Control", "M_Control", "F_PE", "M_PE")
+dge_list_obj$samples$sex_outcome <- factor(dge_list_obj$samples$sex_outcome, levels=sex_outcome_levels)
+
+outcome_levels <- c("Control", "PE")
+dge_list_obj$samples$Outcome <- factor(dge_list_obj$samples$Outcome, levels=outcome_levels)
+
+## save the filtered and normalised DGEList object
+# saveRDS(dge_list_obj,
+#         file = output_dgelist_58_file)
+```
+
+# Plot MDS
+
+```{r}
+# define colours for each sex_outcome group
+outcome_levels <- levels(as.factor(dge_list_obj$samples$Outcome))
+colors <- rainbow(length(outcome_levels))
+# create a colour vector that matches the rows in the DGElist object
+col_vector <- colors[as.numeric(as.factor(dge_list_obj$samples$Outcome))]
+
+# save as png
+# png(file = output_mds_file,
+#     width = 12,
+#     height = 9,
+#     units = "in",
+#     res = 150)
+# Create the MDS plot with customizations
+limma::plotMDS(dge_list_obj, col=col_vector, labels=dge_list_obj$samples$samplename, main="MDS Plot 58 samples - deduplicated")
+legend("topright", legend=outcome_levels, col=colors, pch=20, xpd=TRUE, inset=c(0.01, -0.1))
+# dev.off()
+```
+
+# Differential Expression
+- no covariates are used in this base model 
+```{r}
+## No covariates
+#Create and write out design matrix
+model_noCovariate <- '~0 + Outcome'
+# establish the design matrix
+design_PE <- model.matrix(formula(model_noCovariate),
+                              data = dge_list_obj$samples)
+# make the column names a little nicer
+colnames(design_PE) <- c(outcome_levels)
+
+# # save a csv of the design matrix
+# write_csv(data.frame(design_PE) %>%
+#             tibble::rownames_to_column("samplename"),
+#           file = outDesignMatrix_file,
+#           col_names = TRUE)
+```
+
+```{r}
+# perform the voom
+voom_PE <- voom(dge_list_obj, design_PE, plot = TRUE)
+
+# fit the linear model
+fit_PE <- lmFit(voom_PE, design_PE)
+```
+
+## allTable and residuals for n=58 
+
+```{r}
+# perform bayesian adjustment
+fit_PE <- eBayes(fit_PE)
+
+# check the coefficients
+full_model_coefficients <- fit_PE$coefficients
+saveRDS(full_model_coefficients,
+        file = file.path(outdir, "sexAgnostic_full_model_coefficients.rds"))
+dim(full_model_coefficients)
+
+# summary table of the sex PE fit
+summary(decideTests(fit_PE,
+                    adjust.method = "fdr",
+                    p.value = 0.05))
+
+# all DE results for the female_PE comparison
+allTable_PE <- topTable(fit_PE,
+                             n = Inf,
+                             sort = "none")
+
+```
+
+## Sex-specific contrast, fit and residuals
+
+```{r}
+# set the contrasts - this makes it easier to "see" what we're testing
+contrast_PE <- makeContrasts(PE = PE-Control,
+                                 levels = design_PE)
+contrast_PE
+
+# fit a linear regression to the contrast questions
+contrast_fit_PE <- contrasts.fit(fit_PE, contrast_PE)
+
+# perform bayesian adjustment
+contrast_fit_PE <- eBayes(contrast_fit_PE)
+
+# grab the residuals
+res_post_dedup <- residuals(fit_PE,voom_PE)
+saveRDS(res_post_dedup,
+        file = file.path(outdir, "residuals_PE.rds"))
+
+# grab the fitted values
+fitted_post_dedup <- fitted(fit_PE)
+saveRDS(fitted_post_dedup,
+        file = file.path(outdir, "fitted_values_PE.rds"))
+
+# check the coefficients
+coefficients <- contrast_fit_PE$coefficients
+saveRDS(coefficients,
+        file = file.path(outdir, "coefficients_PE.rds"))
+dim(contrast_fit_PE$coefficients)
+```
+
+```{r}
+# summary table of the sex PE fit
+summary(decideTests(contrast_fit_PE,
+                    adjust.method = "fdr",
+                    p.value = 0.05))
+
+# all DE results for the female_PE comparison
+allTable_PE <- topTable(contrast_fit_PE,
+                             coef = "PE",
+                             n = Inf,
+                             sort = "p")
+# create output files and save
+write_csv(allTable_PE,
+          file=file.path(outdir, "allTable_PE.csv"))
+
+
+```
+## Prepare and save the rank file data for GSEA
+
+```{r}
+allTable_PE["rank"] <- (sign(allTable_PE$logFC))*(-log(allTable_PE$adj.P.Val, 10))
+rankFile <- dplyr::select(allTable_PE, hgnc_symbol, rank) %>%
+  arrange(., rank)
+
+# write out the table ready for GSEAe
+write.table(rankFile, file = file.path(outdir, "PE_rankFile.rnk"),
+            sep = "\t", 
+            row.names = FALSE,
+            col.names = TRUE,
+            quote = FALSE)
+
+write.table(rankFile, file = file.path("/media/sf_D_DRIVE/VM_Projects/preeclampsia_sex_chromosome_informed/PE_rankFile.rnk"),
+            sep = "\t", 
+            row.names = FALSE,
+            col.names = TRUE,
+            quote = FALSE)
+
+
+```
+
+# Session information
+```{r session info}
+
+sessionInfo()
+
+```
