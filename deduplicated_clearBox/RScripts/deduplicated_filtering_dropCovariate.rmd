@@ -87,6 +87,49 @@ gene_info <- gene_info[!duplicated(gene_info$ensembl_gene_id), ]
 
 ```
 
+# Metadata table for the paper
+
+```{r}
+library(dplyr)
+library(tidyr)
+library(knitr)
+
+summary_table <- metadata %>%
+  group_by(sex_outcome, Sex) %>%
+  summarise(
+    # Maternal Age
+    `Maternal Age (Mean ± SD)` = sprintf("%.1f ± %.1f", 
+                                         mean(maternalAge, na.rm = TRUE), 
+                                         sd(maternalAge, na.rm = TRUE)),
+    
+    # BMI
+    `BMI (Mean ± SD)` = sprintf("%.1f ± %.1f", 
+                                mean(BMI, na.rm = TRUE), 
+                                sd(BMI, na.rm = TRUE)),
+    
+    # Gestational Age
+    `Gestational Age (Mean ± SD)` = sprintf("%.1f ± %.1f", 
+                                            mean(GestationalAge, na.rm = TRUE), 
+                                            sd(GestationalAge, na.rm = TRUE)),
+    
+    # Birthweight
+    `Birthweight (g) (Mean ± SD)` = sprintf("%.1f ± %.1f", 
+                                            mean(Birthweight, na.rm = TRUE), 
+                                            sd(Birthweight, na.rm = TRUE)),
+                                            
+    # Sample Size
+    `N` = n()
+  ) %>%
+  ungroup()
+
+# Optional: Print the table
+print(t(summary_table[2,]))
+
+# Optional: Create a formatted kable table
+kable(t(summary_table))
+
+```
+
 # Plot the raw library sizes
 
 ```{r}
