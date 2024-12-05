@@ -39,7 +39,7 @@ outdir <- file.path(projectDir, paste0(expt_name, "_output"))
 output_spreadsheet_file <- file.path(outdir, paste0(expt_name, "filtered_DE.csv"))
 output_pValue_file <- file.path(outdir, paste0(expt_name, "pValue_DE.csv"))
 output_log2CPM_file <- file.path(outdir, paste0(expt_name, "log2CPM.csv"))
-output_dgelist_58_file <- file.path(projectDir, "clearBoxRawData/filt_norm_dgelist_58.rds")
+output_dgelist_58_file <- file.path(projectDir, "clearBoxCleanData/filt_norm_dgelist_58_pre_dedup.rds")
 output_gene_wise_bcv_results_male_file <- file.path(projectDir, "clearBoxCleanData/pre_dedup_gene_wise_bcv_results_male.csv")
 output_gene_wise_bcv_results_female_file <- file.path(projectDir, "clearBoxCleanData/pre_dedup_gene_wise_bcv_results_female.csv")
 
@@ -101,6 +101,15 @@ summarise(
 # Plot the raw library sizes
 
 ```{r}
+
+# calculate the median raw library size pre-deduplication
+median_lib_size <- rawCounts %>%
+  tibble::column_to_rownames("Geneid") %>%
+  dplyr::select(all_of(metadata$samplename)) %>%
+  colSums() %>%
+  median()
+
+
 data.frame(colSums(rawCounts[, -1])) %>%
   rename(lib.size = colSums.rawCounts....1..) %>%
   tibble::rownames_to_column("samplename") %>%
@@ -181,8 +190,8 @@ sex_outcome_levels <- c("F_Control", "M_Control", "F_PE", "M_PE")
 dge_list_obj$samples$sex_outcome <- factor(dge_list_obj$samples$sex_outcome, levels=sex_outcome_levels)
 
 ## save the filtered and normalised DGEList object
-# saveRDS(dge_list_obj,
-#         file = output_dgelist_58_file)
+saveRDS(dge_list_obj,
+        file = output_dgelist_58_file)
 ```
 
 # Plot MDS
