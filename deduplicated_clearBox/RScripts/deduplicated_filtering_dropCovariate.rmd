@@ -133,6 +133,16 @@ kable(t(summary_table))
 # Plot the raw library sizes
 
 ```{r}
+
+## library size information for the paper
+# calculate the median raw library size pre-deduplication
+median_lib_size <- rawCounts_deduplicated %>%
+  tibble::column_to_rownames("Geneid") %>%
+  dplyr::select(all_of(metadata$samplename)) %>%
+  colSums() %>%
+  median()
+
+
 data.frame(colSums(rawCounts_deduplicated[, -1])) %>%
   rename(lib.size = colSums.rawCounts_deduplicated....1..) %>%
   tibble::rownames_to_column("samplename") %>%
