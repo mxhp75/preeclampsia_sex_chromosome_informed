@@ -49,7 +49,7 @@ input_dge_list_obj_file <- file.path(projectDir, "deduplicated_clearBox/output/f
 input_tpm_table_file <- file.path(projectDir, "deduplicated_clearBox/output/tpm_allSample_deduplicated_bulkCountMatrix.txt")
 input_metadata_quality_file <- file.path(projectDir, "clearBoxCleanData/metadata_quality.csv")
 input_allTable_female_file <- file.path(projectDir, "deduplicated_clearBox/output/allTable_female_post_dedup.csv")
-input_allTable_male_file <- file.path(projectDir, "deduplicated_clearBox/output/allTable_male_post_dedup.csv")
+input_allTable_male_file <- file.path(projectDir, "deduplicated_clearBox/output/58_sample_noCovariate/allTable_male.csv")
 gene_info_file <- file.path(projectDir, "clearBoxCleanData/gencode_v29_gene_id_symbol_chr_biotype.csv")
 
 input_cibersortx_post_dedup_proportions_file <- file.path(projectDir, "deduplicated_clearBox/cibersortx_output/CIBERSORTx_Job10_Adjusted.txt")
@@ -59,6 +59,11 @@ input_cibersortx_sigMatrix_file <- file.path(projectDir, "cibersortx_reduced_sig
 # file paths for output files
 outdir <- file.path("/media/sf_D_DRIVE/VM_Projects/20240619_deduplicateBams/plots")
 
+out_final_correlation_results_80percent_file <- file.path(projectDir, "deduplicated_clearBox/output/final_correlation_results_80percent.csv")
+out_file_cibersortx_stats <- file.path(projectDir, "cibersortx_stats.xlsx")
+
+out_file_oddsRatio_stats_male <- file.path(outdir, "out_file_oddsRatio_stats_male.xlsx")
+out_file_oddsRatio_stats_female <- file.path(outdir, "out_file_oddsRatio_stats_female.xlsx")
 
 # create directories for output files
 
@@ -113,6 +118,428 @@ dim(cibersortx_reduced_sigMatrix)
 
 
 ```
+
+```{r}
+# differnce on GA between all PE and Control
+t_test_result <- t.test(GestationalAge ~ Outcome, data = metadata_quality)
+# Mean difference
+mean_difference <- t_test_result$estimate[2] - t_test_result$estimate[1]
+
+# P-value
+p_value <- t_test_result$p.value
+
+# difference in GA between males only
+# Parametric test (t-test)
+t_test_result_male <- t.test(GestationalAge ~ sex_outcome, 
+                             data = metadata_quality, 
+                             subset = sex_outcome %in% c("M_PE", "M_Control"))
+# Mean difference
+mean_difference_male <- t_test_result_male$estimate[2] - t_test_result_male$estimate[1]
+
+# P-value
+p_value_male <- t_test_result_male$p.value
+
+# difference in GA between males only
+t_test_result_female <- t.test(GestationalAge ~ sex_outcome, 
+                             data = metadata_quality, 
+                             subset = sex_outcome %in% c("F_PE", "F_Control"))
+# Mean difference
+mean_difference_female <- t_test_result_female$estimate[2] - t_test_result_female$estimate[1]
+
+# P-value
+p_value_female <- t_test_result_female$p.value
+
+```
+
+
+## CIBERSORTx outcome data for the paper
+
+```{r}
+
+# import the post deduplication cibersortx proportions
+cibersortx_stats <- read.table(file = input_cibersortx_post_dedup_proportions_file,
+                               header = TRUE,
+                               sep = "\t") %>%
+  dplyr::select(samplename = Mixture, everything()) %>%
+   # remove the traiing "_dedup" from the samplename
+  dplyr::mutate(samplename = gsub("_dedup$", "", samplename)) %>%
+  # keep only the 58 final samples
+  inner_join(metadata_quality[, c("samplename")], by = "samplename")
+
+# save a table of cibersortx output for the paper
+library(writexl)
+
+# Write the dataframe to an Excel file
+write_xlsx(cibersortx_stats, out_file_cibersortx_stats)
+
+# Calculate the mean and standard deviation for the `Correlation` column
+correlation_mean <- mean(cibersortx_stats$Correlation, na.rm = TRUE)
+correlation_sd <- sd(cibersortx_stats$Correlation, na.rm = TRUE)
+
+# Calculate the mean and standard deviation for the `RMSE` column
+rmse_mean <- mean(cibersortx_stats$RMSE, na.rm = TRUE)
+rmse_sd <- sd(cibersortx_stats$RMSE, na.rm = TRUE)
+
+# Print results
+cat("Correlation - Mean:", correlation_mean, "SD:", correlation_sd, "\n")
+cat("RMSE - Mean:", rmse_mean, "SD:", rmse_sd, "\n")
+
+# Select columns to include (exclude "samplename", "P.value", "Correlation", "RMSE")
+filtered_data <- cibersortx_stats[, !(colnames(cibersortx_stats) %in% c("samplename", "P.value", "Correlation", "RMSE"))]
+
+# Calculate mean and standard deviation for each cell type for all samples
+cellTypes_allSamples <- data.frame(
+  Column = colnames(filtered_data),
+  Mean = colMeans(filtered_data, na.rm = TRUE)*100,
+  SD = apply(filtered_data, 2, sd, na.rm = TRUE)*100
+)
+
+# Calculate mean and standard deviation for each cell type for samples by sex
+
+# Remove trailing "_dedup" from the `samplename` column in cibersortx_stats
+cibersortx_stats$samplename <- gsub("_dedup$", "", cibersortx_stats$samplename)
+# Join cibersortx_stats with metadata_quality by "samplename"
+merged_data <- cibersortx_stats %>%
+  inner_join(metadata_quality[, c("samplename", "Sex")], by = "samplename")  # Merge based on "samplename"
+
+# Exclude specific columns from analysis (P.value, Correlation, RMSE)
+filtered_data <- merged_data %>%
+  select(-P.value, -Correlation, -RMSE)
+
+# Group by "Sex" and calculate mean and SD for each column
+result <- filtered_data %>%
+  group_by(Sex) %>%
+  summarise(across(where(is.numeric), 
+                   list(Mean = ~mean(.x, na.rm = TRUE), 
+                        SD = ~sd(.x, na.rm = TRUE)),
+                   .names = "{col}_{fn}")) %>% # Create column names dynamically
+  tibble::column_to_rownames("Sex") %>%
+  t()
+
+# Return the resulting data frame
+t(result)
+```
+
+# test cell-type proportions differences
+- this uses the beta regression suggested in the Campbell _et al._ paper 
+
+```{r}
+# perform beta regression to determine if there are cell-type differences based on outcome
+# with columns for cell types, case_control, fetal_sex, and gestational_age
+
+# Function to perform beta regression for a single cell type
+# Load required libraries
+library(betareg)
+library(tidyverse)
+library(broom)
+
+# Function to perform beta regression for a single cell type
+perform_beta_regression <- function(cell_type, data) {
+  # Transform data to ensure all values are between 0 and 1
+  data[[cell_type]] <- (data[[cell_type]] * (nrow(data) - 1) + 0.5) / nrow(data)
+  
+  formula <- as.formula(paste(cell_type, "~ Outcome + GestationalAge"))
+  
+  tryCatch({
+    model <- betareg(formula, data = data)
+    
+    # Extract results
+    results <- tidy(model) %>%
+      filter(term == "OutcomePE") %>%
+      mutate(cell_type = cell_type,
+             odds_ratio = exp(estimate),
+             ci_lower = exp(estimate - 1.96 * std.error),
+             ci_upper = exp(estimate + 1.96 * std.error))
+    
+    return(results)
+  }, error = function(e) {
+    warning(paste("Error in cell type:", cell_type, "- ", e$message))
+    return(NULL)
+  })
+}
+
+# List of cell type columns
+cell_types <- c("Fetal.Mesenchymal.Stem.Cells", "CD14..Monocytes", "CD8..Activated.T.Cells", "Naive.CD4..T.Cells",
+                "Naive.CD8..T.Cells", "Natural.Killer.T.Cells", "B.Cells", "Fetal.GZMK..Natural.Killer", "Fetal.Memory.CD4..T.Cells",
+                "Fetal.Hofbauer.Cells", "Fetal.Plasmacytoid.Dendritic.Cells", "Fetal.GZMB..Natural.Killer", "Fetal.Endothelial.Cells",
+                "Fetal.Syncytiotrophoblast", "Fetal.Fibroblasts", "Cytotrophoblast", "Fetal.Nucleated.Red.Blood.Cells", "Maternal.FCGR3A..Monocytes",
+                "Maternal.Plasma.Cells", "Fetal.Extravillous.Trophoblasts")
+
+# Filter metadata to exclude samples where Sex = "M"
+filtered_metadata <- metadata_quality %>%
+  filter(Sex == "M")
+
+# Prepare the data
+df <- dplyr::left_join(filtered_metadata, cibersortx_stats, by = "samplename") %>%
+  dplyr::select(all_of(c(cell_types, "Outcome", "GestationalAge")))
+
+# Check for any NAs or infinite values
+df <- df %>% drop_na()
+
+# Perform beta regression for each cell type
+results_list <- lapply(cell_types, perform_beta_regression, data = df)
+
+# Remove NULL results (if any errors occurred)
+results_list <- results_list[!sapply(results_list, is.null)]
+
+# Combine results
+final_results <- bind_rows(results_list)
+
+# View results
+print(final_results)
+
+final_results <- final_results %>%
+  mutate(
+    significant = (ci_lower > 1 | ci_upper < 1),
+    direction = case_when(
+      odds_ratio > 1 & significant ~ "Higher in PE",
+      odds_ratio < 1 & significant ~ "Lower in PE",
+      TRUE ~ "No significant difference"
+    )
+  )
+# Write the dataframe to an Excel file
+write_xlsx(final_results, out_file_oddsRatio_stats_male)
+
+# Updated ggplot code
+ggplot(final_results, aes(x = reorder(cell_type, odds_ratio), y = odds_ratio)) +
+  geom_point(aes(color = direction), size = 3) +
+  geom_errorbar(aes(ymin = ci_lower, ymax = ci_upper, color = direction), width = 0.2) +
+  coord_flip() +
+  geom_hline(yintercept = 1, linetype = "dashed") +
+  scale_color_manual(values = c("Higher in PE" = "red", "Lower in PE" = "blue", "No significant difference" = "gray")) +
+  scale_y_log10() +  # Use log scale for better visualization of ratios
+  labs(title = "Odds Ratios for Cell Type Proportions in Preeclampsia",
+       x = "Cell Type",
+       y = "Odds Ratio (95% CI, log scale)",
+       color = "Association with PE") +
+  theme_minimal() +
+  theme(axis.text.y = element_text(size = 8),
+        legend.position = "bottom")
+
+# If you want to save the plot
+# ggsave("cell_type_odds_ratios_PE.png", width = 12, height = 10, dpi = 300)
+
+# Print a summary table
+summary_table <- final_results %>%
+  select(cell_type, odds_ratio, ci_lower, ci_upper, direction) %>%
+  arrange(desc(odds_ratio))
+
+print(summary_table)
+
+##########################################################################################################################################
+
+# Filter metadata to exclude samples where Sex = "M"
+filtered_metadata_F <- metadata_quality %>%
+  filter(Sex == "F")
+
+# Prepare the data
+df_F <- dplyr::left_join(filtered_metadata_F, cibersortx_stats, by = "samplename") %>%
+  dplyr::select(all_of(c(cell_types, "Outcome", "GestationalAge")))
+
+# Check for any NAs or infinite values
+df_F <- df_F %>% drop_na()
+
+# Perform beta regression for each cell type
+results_list_F <- lapply(cell_types, perform_beta_regression, data = df_F)
+
+# Remove NULL results (if any errors occurred)
+results_list_F <- results_list_F[!sapply(results_list_F, is.null)]
+
+# Combine results
+final_results_F <- bind_rows(results_list_F)
+
+# View results
+print(final_results_F)
+
+final_results_F <- final_results_F %>%
+  mutate(
+    significant = (ci_lower > 1 | ci_upper < 1),
+    direction = case_when(
+      odds_ratio > 1 & significant ~ "Higher in PE",
+      odds_ratio < 1 & significant ~ "Lower in PE",
+      TRUE ~ "No significant difference"
+    )
+  )
+# Write the dataframe to an Excel file
+write_xlsx(final_results_F, out_file_oddsRatio_stats_female)
+
+# Updated ggplot code
+ggplot(final_results_F,
+       aes(x = reorder(cell_type, odds_ratio), y = odds_ratio)) +
+  geom_point(aes(color = direction), size = 3) +
+  geom_errorbar(aes(ymin = ci_lower, ymax = ci_upper, color = direction), width = 0.2) +
+  coord_flip() +
+  geom_hline(yintercept = 1, linetype = "dashed") +
+  scale_color_manual(values = c("Higher in PE" = "red", "Lower in PE" = "blue", "No significant difference" = "gray")) +
+  scale_y_log10() +  # Use log scale for better visualization of ratios
+  labs(title = "Odds Ratios for Cell Type Proportions in Preeclampsia",
+       x = "Cell Type",
+       y = "Odds Ratio (95% CI, log scale)",
+       color = "Association with PE") +
+  theme_minimal() +
+  theme(axis.text.y = element_text(size = 8),
+        legend.position = "bottom")
+
+# If you want to save the plot
+# ggsave("cell_type_odds_ratios_PE.png", width = 12, height = 10, dpi = 300)
+
+# Print a summary table
+summary_table_F <- final_results_F %>%
+  select(cell_type, odds_ratio, ci_lower, ci_upper, direction) %>%
+  arrange(desc(odds_ratio))
+
+print(summary_table_F)
+```
+
+# Ridgeline plot of cell type proportions
+
+```{r}
+library(ggplot2)
+library(ggridges)
+
+
+# Remove specified columns
+cibersort_plot_data <- cibersortx_stats %>% 
+  select(-c(P.value, Correlation, RMSE))
+
+# Reshape to long format
+cibersort_long <- cibersort_plot_data %>%
+  pivot_longer(cols = -c(samplename), 
+               names_to = "CellType", 
+               values_to = "Proportion")
+
+# Merge with sex_outcome from metadata
+cibersort_long <- cibersort_long %>%
+  left_join(metadata_quality %>% 
+              select(samplename, sex_outcome), 
+            by = "samplename")
+
+# Create ridgeline plot
+ggplot(cibersort_long, aes(x = Proportion, y = CellType, fill = sex_outcome)) +
+  geom_density_ridges(alpha = 0.7, scale = 1.5) +
+  theme_minimal() +
+  theme(
+    axis.title.y = element_blank(),
+    axis.text.y = element_text(size = 8)
+  ) +
+  labs(
+    title = "Cell Type Proportions by Sex Outcome",
+    x = "Proportion",
+    fill = "Sex Outcome"
+  ) +
+  scale_fill_brewer(palette = "Set1")
+```
+
+## Sex specific Ridgeline plots
+
+```{r}
+
+library(patchwork)
+
+# Remove specified columnsx
+cibersort_plot_data <- cibersortx_stats %>% 
+  select(-c(P.value, Correlation, RMSE))
+
+# Reshape to long format
+cibersort_long <- cibersort_plot_data %>%
+  pivot_longer(cols = -c(samplename), 
+               names_to = "CellType", 
+               values_to = "Proportion")
+
+# Merge with metadata
+cibersort_long <- cibersort_long %>%
+  left_join(metadata_quality %>% 
+              select(samplename, Sex, Outcome), 
+            by = "samplename")
+
+# Plot for Female samples
+female_plot <- ggplot(filter(cibersort_long, Sex == "F"), 
+                      aes(x = Proportion, y = CellType, fill = Outcome)) +
+  geom_density_ridges(alpha = 0.7, scale = 1.5) +
+  theme_minimal() +
+  theme(
+    axis.title.y = element_blank(),
+    axis.text.y = element_text(size = 8)
+  ) +
+  labs(
+    title = "Female Cell Type Proportions",
+    x = "Proportion",
+    fill = "Outcome"
+  ) +
+  scale_fill_brewer(palette = "Set1")
+
+# Plot for Male samples
+male_plot <- ggplot(filter(cibersort_long, Sex == "M"), 
+                    aes(x = Proportion, y = CellType, fill = Outcome)) +
+  geom_density_ridges(alpha = 0.7, scale = 1.5) +
+  theme_minimal() +
+  theme(
+    axis.title.y = element_blank(),
+    axis.text.y = element_text(size = 8)
+  ) +
+  labs(
+    title = "Male Cell Type Proportions",
+    x = "Proportion",
+    fill = "Outcome"
+  ) +
+  scale_fill_brewer(palette = "Set1")
+
+# Combine plots
+combined_plot <- female_plot + male_plot + 
+  plot_layout(guides = "collect") & 
+  theme(legend.position = "right")
+
+# Display or save the combined plot
+print(combined_plot)
+```
+
+# Stacked bar charts of cell-type proportions
+
+```{r}
+# Define a custom color palette with enough distinct colors
+custom_colors <- c("#e6194b", "#3cb44b", "#ffe119", "#0082c8", "#f58231", "#911eb4", "#46f0f0", "#f032e6",
+                   "#d2f53c", "#fabebe", "#008080", "#e6beff", "#aa6e28", "#fffac8", "#800000", "#aaffc3",
+                   "#808000", "#ffd8b1", "#000080", "#808080", "#FFFFFF", "#000000")
+
+# Define the new levels for sex_outcome
+new_levels <- c("F_Control", "F_PE", "M_Control", "M_PE")
+
+# create a long table format that combines the cell-type proportions with the PE outcome information
+stacked_barchart_data <- dplyr::right_join(cibersortx_post_dedup_proportions, dplyr::select(metadata_quality, samplename, sex_outcome),
+                                           by = "samplename") %>%
+  mutate(sex_outcome = factor(sex_outcome, levels = new_levels)) %>%
+  arrange(sex_outcome, samplename) %>%
+  mutate(samplename = factor(samplename, levels = unique(samplename))) %>%
+  melt()
+
+
+# png(file=file.path(outdir, "post_dedup_stacked_proportions.png"),
+#     width=14,
+#     height=8,
+#     units = "in",
+#     res = 150)
+ggplot(data = stacked_barchart_data,
+       aes(x = samplename,
+           y = value,
+           fill = variable,
+           label = sex_outcome)) +
+  geom_bar(stat = "identity") +
+  scale_fill_manual(values = custom_colors) +
+  labs(title = "Stacked Bar Chart of Post Deduplication Cell Type Proportions",
+       x = "Samplename",
+       y = "Cell Type Proportion",
+       fill = "Cell Type") +
+  theme_minimal() +
+    theme(axis.text.x = element_text(angle = 90, vjust = 0.4)) +
+    geom_text(aes(x = samplename,
+                  y = 0.01,
+                  label = sex_outcome),
+            angle = 90,
+            size = 3)
+# dev.off()
+```
+
+
 # Correlate gene expression with cell-type proportions
 ## Include genes that are both DE and in the cibersortx signature matrix  
 - I will use the tpm matrix for the correlation as this is the table that is input into Cibersortx. Might not make any difference.  
@@ -192,7 +619,7 @@ pheatmap(final_correlation_results)
 ```
 
 ## Male samples only
-
+### Only genes that are in both the DE ad signature matrix
 ```{r}
 # create a vector of male sample IDs
 male_samplename <- metadata_quality %>%
@@ -280,6 +707,129 @@ pheatmap(final_correlation_results_plot_male,
 dev.off()
 ```
 
+### All DE genes
+
+```{r}
+# create a vector of male sample IDs
+male_samplename <- metadata_quality %>%
+  filter(Sex == "M") %>%
+  pull(samplename)
+
+# put the hgnc symbol into the rownames for the tpm matrix
+## drop rows with duplicate hgnc symbols
+tpm_bulkCountMatrix_all_genes_male <- tpm_table[!duplicated(tpm_table$hgnc_symbol), ]
+tpm_bulkCountMatrix_all_genes_male <- tpm_bulkCountMatrix_all_genes_male[, c("hgnc_symbol", male_samplename)]
+## ensure rownames are empty
+rownames(tpm_bulkCountMatrix_all_genes_male) <- NULL
+# move hgnc column to the rownames
+tpm_bulkCountMatrix_all_genes_male %<>% tibble::column_to_rownames("hgnc_symbol")
+
+# overlap between signature and DE genes - this is used to cut down the number of genes tested for correlation
+## genes with 95% confidence
+# topTable_male <- dplyr::filter(allTable_male, adj.P.Val < 0.05)
+## genes with 80% confidence
+topTable_male <- dplyr::filter(allTable_male, adj.P.Val < 0.20)
+# sig_de_overlap <- subset(cibersortx_reduced_sigMatrix, GeneSymbol %in% topTable_male$hgnc_symbol)
+  
+
+# Initialize an empty data frame to store correlation results
+final_correlation_results <- data.frame(Cell_Type = names(cibersortx_post_dedup_proportions)[-1], stringsAsFactors = FALSE)
+
+# loop through the genes and correlate with cell-type proportions
+for (i in 1:nrow(topTable_male)) {
+  
+  # Join sig_de_overlap with topTable_male to get the ensembl IDs
+  # sig_de_overlap_ensbl <- dplyr::left_join(sig_de_overlap, topTable_male[, c("ensembl", "hgnc_symbol")], by = c("GeneSymbol" = "hgnc_symbol")) %>%
+  #   dplyr::select(., GeneSymbol, ensembl, everything())
+  
+  GOI_ensbl <- paste0(topTable_male$ensembl[i])
+  GOI_hgnc <- paste0(topTable_male$hgnc_symbol[i])
+  
+  cibersortx_proportion_rownames <- cibersortx_post_dedup_proportions %>%
+    tibble::column_to_rownames("samplename")
+  
+  tpm_GOI <- reshape2::melt(
+  subset(tpm_bulkCountMatrix_all_genes_male, rownames(tpm_bulkCountMatrix_all_genes_male) %in% topTable_male$hgnc_symbol[i]) %>%
+    tibble::rownames_to_column()
+  ) %>% 
+    as.data.frame() %>% 
+    set_colnames(c("ensembl", "samplename", paste0(topTable_male$ensembl[i]))) %>% 
+    dplyr::select(., -ensembl) %>%
+    dplyr::left_join(., cibersortx_post_dedup_proportions, by = "samplename") %>%
+    dplyr::select(., -samplename)
+
+  # Calculate correlations between gene expression and cell type proportions for each cell type
+  correlations <- lapply(colnames(tpm_GOI)[-1], function(cell_type) {
+    cor(tpm_GOI[[1]], tpm_GOI[[cell_type]])
+  })
+  
+  # Combine correlations into a data frame
+  correlation_results <- data.frame(names(tpm_GOI)[-1])
+  
+  # Add correlation results for the current gene as new columns
+  colnames(correlation_results) <- paste(GOI_hgnc)
+  correlation_results[] <- unlist(correlations)
+  
+  # Append the current gene's correlation results to the final data frame
+  final_correlation_results <- cbind(final_correlation_results, correlation_results)
+  
+}
+
+# prepare the correlations for plotting
+final_correlation_results_plot_male <- final_correlation_results %>%
+  mutate_all(~replace(., is.na(.), 0)) %>%
+    column_to_rownames("Cell_Type")
+
+write_csv(final_correlation_results,
+          file = out_final_correlation_results_80percent_file,
+          col_names = TRUE)
+
+# Format the numbers to two decimal places
+formatted_numbers <- apply(final_correlation_results_plot_male, 2, function(x) sprintf("%.2f", x))
+
+dim_final_correlation_males <- dim(final_correlation_results) # 20 44
+
+annotation_DE <- topTable_male %>%
+    mutate(DE_direction = case_when(
+    logFC > 0 ~ "up_regulated",
+    logFC <= 0 ~ "down_regulated"
+  )) %>%
+  dplyr::select(., hgnc_symbol, DE_direction) %>%
+  tibble::column_to_rownames("hgnc_symbol")
+
+# png(file=file.path(outdir, "male_post_dedup_correlation_heatmap_80percent_DE.png"),
+#     width=14,
+#     height=8,
+#     units = "in",
+#     res = 150)
+pheatmap(final_correlation_results_plot_male,
+         cluster_rows = TRUE,
+         cluster_cols = TRUE,
+         show_colnames = FALSE,
+         annotation_col = annotation_DE,
+  main = "Correlations between expression of DE genes and cell types - Male")
+# dev.off()
+```
+
+
+### Sanity plot of male proportions by outcome
+- The correlation heatmaps show a strong correlation between many cell types and the expression of DE genes.  
+- Here I will plot the cell-type proportions for male uncomplicated and male PE. If these cell type proportions are driving the DE we should see a difference in cell-type proportions between the PE and uncomplicated group. This might be difficult to see with only 5 PE boys (ie not much scatter).  
+
+```{r}
+
+cell_type <- "Fetal.Fibroblasts"
+cibersortx_post_dedup_proportions %>%
+  left_join(metadata_quality[, c("samplename", "sex_outcome")], by = "samplename") %>%
+  filter(!samplename %in% c("SCP3492", "SCP4010", "SCP4060")) %>%
+  melt(.) %>%
+  dplyr::filter(variable == cell_type) %>%
+  ggplot(aes(x = sex_outcome, y = value, fill = sex_outcome)) +
+  geom_bar(stat = "identity", position = "dodge") +
+  labs(x = "Sex Outcome", y = cell_type, fill = "Sex Outcome") +
+  theme_minimal()
+
+```
 ## Female samples only
 
 ```{r}
@@ -355,18 +905,110 @@ final_correlation_results_plot_female <- final_correlation_results %>%
 # Format the numbers to two decimal places
 formatted_numbers <- apply(final_correlation_results_plot_female, 2, function(x) sprintf("%.2f", x))
 
-png(file=file.path(outdir, "female_post_dedup_correlation_heatmap.png"),
-    width=14,
-    height=8,
-    units = "in",
-    res = 150)
+# png(file=file.path(outdir, "female_post_dedup_correlation_heatmap.png"),
+#     width=14,
+#     height=8,
+#     units = "in",
+#     res = 150)
 pheatmap(final_correlation_results_plot_female,
          cluster_rows = TRUE,
          cluster_cols = TRUE,
   display_numbers = formatted_numbers,
   number_fontsize = 9,
   main = "Correlations between expression of DE genes and cell types - Female")
-dev.off()
+# dev.off()
+```
+### All DE genes
+
+```{r}
+# create a vector of male sample IDs
+female_samplename <- metadata_quality %>%
+  filter(Sex == "F") %>%
+  pull(samplename)
+
+# put the hgnc symbol into the rownames for the tpm matrix
+## drop rows with duplicate hgnc symbols
+tpm_bulkCountMatrix_all_genes_female <- tpm_table[!duplicated(tpm_table$hgnc_symbol), ]
+tpm_bulkCountMatrix_all_genes_female <- tpm_bulkCountMatrix_all_genes_female[, c("hgnc_symbol", female_samplename)]
+## ensure rownames are empty
+rownames(tpm_bulkCountMatrix_all_genes_female) <- NULL
+# move hgnc column to the rownames
+tpm_bulkCountMatrix_all_genes_female %<>% tibble::column_to_rownames("hgnc_symbol")
+
+# overlap between signature and DE genes - this is used to cut down the number of genes tested for correlation
+topTable_male <- dplyr::filter(allTable_male, adj.P.Val < 0.05)
+# sig_de_overlap <- subset(cibersortx_reduced_sigMatrix, GeneSymbol %in% topTable_male$hgnc_symbol)
+  
+
+# Initialize an empty data frame to store correlation results
+final_correlation_results <- data.frame(Cell_Type = names(cibersortx_post_dedup_proportions)[-1], stringsAsFactors = FALSE)
+
+# loop through the genes and correlate with cell-type proportions
+for (i in 1:nrow(topTable_male)) {
+  
+  # Join sig_de_overlap with topTable_male to get the ensembl IDs
+  # sig_de_overlap_ensbl <- dplyr::left_join(sig_de_overlap, topTable_male[, c("ensembl", "hgnc_symbol")], by = c("GeneSymbol" = "hgnc_symbol")) %>%
+  #   dplyr::select(., GeneSymbol, ensembl, everything())
+  
+  GOI_ensbl <- paste0(topTable_male$ensembl[i])
+  GOI_hgnc <- paste0(topTable_male$hgnc_symbol[i])
+  
+  cibersortx_proportion_rownames <- cibersortx_post_dedup_proportions %>%
+    tibble::column_to_rownames("samplename")
+  
+  tpm_GOI <- reshape2::melt(
+  subset(tpm_bulkCountMatrix_all_genes_female, rownames(tpm_bulkCountMatrix_all_genes_female) %in% topTable_male$hgnc_symbol[i]) %>%
+    tibble::rownames_to_column()
+  ) %>% 
+    as.data.frame() %>% 
+    set_colnames(c("ensembl", "samplename", paste0(topTable_male$ensembl[i]))) %>% 
+    dplyr::select(., -ensembl) %>%
+    dplyr::left_join(., cibersortx_post_dedup_proportions, by = "samplename") %>%
+    dplyr::select(., -samplename)
+
+  # Calculate correlations between gene expression and cell type proportions for each cell type
+  correlations <- lapply(colnames(tpm_GOI)[-1], function(cell_type) {
+    cor(tpm_GOI[[1]], tpm_GOI[[cell_type]])
+  })
+  
+  # Combine correlations into a data frame
+  correlation_results <- data.frame(names(tpm_GOI)[-1])
+  
+  # Add correlation results for the current gene as new columns
+  colnames(correlation_results) <- paste(GOI_hgnc)
+  correlation_results[] <- unlist(correlations)
+  
+  # Append the current gene's correlation results to the final data frame
+  final_correlation_results <- cbind(final_correlation_results, correlation_results)
+  
+}
+
+# prepare the correlations for plotting
+final_correlation_results_plot_female <- final_correlation_results %>%
+  mutate_all(~replace(., is.na(.), 0)) %>%
+    column_to_rownames("Cell_Type")
+
+dim_final_correlation_females <- dim(final_correlation_results) # 20 44
+
+annotation_DE <- topTable_male %>%
+    mutate(DE_direction = case_when(
+    logFC > 0 ~ "up_regulated",
+    logFC <= 0 ~ "down_regulated"
+  )) %>%
+  dplyr::select(., hgnc_symbol, DE_direction) %>%
+  tibble::column_to_rownames("hgnc_symbol")
+
+# png(file=file.path(outdir, "female_post_dedup_correlation_heatmap_all_DE.png"),
+#     width=14,
+#     height=8,
+#     units = "in",
+#     res = 150)
+pheatmap(final_correlation_results_plot_female,
+         cluster_rows = TRUE,
+         cluster_cols = TRUE,
+         annotation_col = annotation_DE,
+  main = "Correlations between expression of DE genes and cell types - Female")
+# dev.off()
 ```
 
 ## Compare cell type proportions and correlations between sex
@@ -377,18 +1019,17 @@ rownames(final_correlation_results_plot_female) <- paste0(rownames(final_correla
 rownames(final_correlation_results_plot_male) <- paste0(rownames(final_correlation_results_plot_male), "_male")
 
 heatmap_data <- rbind(final_correlation_results_plot_male, final_correlation_results_plot_female)
-# Format the numbers to two decimal places
-formatted_numbers_compare <- apply(heatmap_data[c("Cytotrophoblast_male", "Cytotrophoblast_female", "Fetal.Nucleated.Red.Blood.Cells_male", "Fetal.Nucleated.Red.Blood.Cells_female", "Fetal.Syncytiotrophoblast_male", "Fetal.Syncytiotrophoblast_female", "Fetal.Endothelial.Cells_male", "Fetal.Endothelial.Cells_female", "Fetal.Mesenchymal.Stem.Cells_male", "Fetal.Mesenchymal.Stem.Cells_female", "Fetal.Hofbauer.Cells_male", "Fetal.Hofbauer.Cells_female"),], 2, function(x) sprintf("%.2f", x))
+
 
 png(file=file.path(outdir, "compare_male_female_cor_heatmap.png"),
     width=14,
     height=8,
     units = "in",
     res = 150)
-pheatmap(heatmap_data[c("Cytotrophoblast_male", "Cytotrophoblast_female", "Fetal.Nucleated.Red.Blood.Cells_male", "Fetal.Nucleated.Red.Blood.Cells_female", "Fetal.Syncytiotrophoblast_male", "Fetal.Syncytiotrophoblast_female", "Fetal.Endothelial.Cells_male", "Fetal.Endothelial.Cells_female", "Fetal.Mesenchymal.Stem.Cells_male", "Fetal.Mesenchymal.Stem.Cells_female", "Fetal.Hofbauer.Cells_male", "Fetal.Hofbauer.Cells_female"),],
+pheatmap(heatmap_data[c("Fetal.Mesenchymal.Stem.Cells_male", "Fetal.Mesenchymal.Stem.Cells_female", "Fetal.Fibroblasts_male", "Fetal.Fibroblasts_female"),],
+         annotation = annotation_DE,
+         cluster_cols = TRUE,
          cluster_rows = FALSE,
-         display_numbers = formatted_numbers_compare,
-         number_fontsize = 9,
          main = "Compare Correlations between Male and Female")
 dev.off()
 ```
@@ -402,9 +1043,16 @@ compare_proportions <- dplyr::left_join(cibersortx_post_dedup_proportions, metad
 
 # Calculate the mean of columns grouped by Sex, excluding specific columns
 mean_proportions <- compare_proportions %>%
-  group_by(Sex) %>%
-  summarise(across(-c(samplename, sex_outcome), mean, na.rm = TRUE)) %>%
-  t()
+  group_by(sex_outcome) %>%
+  summarise(across(-c(samplename, Sex),
+                   mean,
+                   na.rm = TRUE)) %>%
+  pivot_longer(cols = -sex_outcome,
+               names_to = "cell_type",
+               values_to = "mean_proportion") %>%
+  pivot_wider(names_from = sex_outcome,
+              values_from = mean_proportion)
+
 ```
 
 ## Plot gene expression (x-axis) and cell-type proportion (y)
@@ -434,10 +1082,15 @@ temp <- cpm_DE_genes %>% tibble::column_to_rownames("ensembl") %>%
 
 
 ggplot(data = temp,
-       aes(x = ENSG00000162543,
-           y = Cytotrophoblast,
+       aes(x = ENSG00000198108,
+           y = Fetal.Mesenchymal.Stem.Cells,
            colour = sex_outcome)) +
-  geom_point()
+  geom_point() +
+  labs(title = "ENSG00000198108 CHSY3 logFC 1.096",
+       x = "ENSG00000198108 CHSY3 (CPM)",
+       y = "Fetal.Mesenchymal.Stem.Cells",
+       fill = "Sex Outcome") +
+  theme_minimal()
 ```
 
 
