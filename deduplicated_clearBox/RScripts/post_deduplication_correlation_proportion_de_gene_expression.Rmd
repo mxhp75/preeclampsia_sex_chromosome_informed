@@ -200,7 +200,7 @@ cellTypes_allSamples <- data.frame(
 cibersortx_stats$samplename <- gsub("_dedup$", "", cibersortx_stats$samplename)
 # Join cibersortx_stats with metadata_quality by "samplename"
 merged_data <- cibersortx_stats %>%
-  inner_join(metadata_quality[, c("samplename", "Sex")], by = "samplename")  # Merge based on "samplename"
+  inner_join(metadata_quality[, c("samplename", "sex_outcome")], by = "samplename")  # Merge based on "samplename"
 
 # Exclude specific columns from analysis (P.value, Correlation, RMSE)
 filtered_data <- merged_data %>%
@@ -208,12 +208,13 @@ filtered_data <- merged_data %>%
 
 # Group by "Sex" and calculate mean and SD for each column
 result <- filtered_data %>%
-  group_by(Sex) %>%
+  group_by(sex_outcome) %>%
   summarise(across(where(is.numeric), 
                    list(Mean = ~mean(.x, na.rm = TRUE), 
+                        Median = ~median(.x, na.rm = TRUE),
                         SD = ~sd(.x, na.rm = TRUE)),
                    .names = "{col}_{fn}")) %>% # Create column names dynamically
-  tibble::column_to_rownames("Sex") %>%
+  tibble::column_to_rownames("sex_outcome") %>%
   t()
 
 # Return the resulting data frame
