@@ -7,6 +7,11 @@ output: html_document
 
 # Load required libraries
 ```{r load Libraries}
+
+# Clean the environment
+rm(list = ls(all.names = TRUE)) # will clear all objects including hidden objects
+gc() # free up memory and report the memory usage
+
 library(plyr)
 library(reshape2)
 library(dplyr)
@@ -17,9 +22,15 @@ library(readr)
 library(magrittr)
 library(tibble)
 library(ggplot2)
+library(patchwork)
 library(ggbeeswarm)
 library(ggrepel)
 library(pheatmap)
+
+library(clusterProfiler)
+library(org.Hs.eg.db)
+library(AnnotationDbi)
+
 
 # set project directory
 projectDir <- "/home/smit1924/preeclampsia_sex_chromosome_informed"
@@ -30,6 +41,8 @@ counts_geneID_file <- file.path(projectDir, "deduplicated_clearBox/readCounts/de
 
 gene_info_file <- file.path(projectDir, "clearBoxCleanData/gencode_v29_gene_id_symbol_chr_biotype.csv")
 metadata_file <- file.path(projectDir, "clearBoxRawData/cleanSampleMetadata.csv")
+input_SCOPE_STOP_cust_birthwgt_file <- file.path(projectDir, "deduplicated_clearBox/rawData/SCOPE_STOP_cust_birthwgt.csv")
+input_gene_lists_file <- file.path(projectDir, "deduplicated_clearBox/rawData/gene_lists.xlsx")
 
 # set the output directory
 outdir <- file.path(projectDir, "deduplicated_clearBox/output/58_sample_noCovariate")
@@ -78,12 +91,30 @@ colnames(rawCounts_deduplicated) <- gsub("X.media.sf_D_DRIVE.VM_Projects.2024061
 ## Metadata
 metadata <- read_csv(file = metadata_file)
 
+birthWgtCentile <- read_csv(file = input_SCOPE_STOP_cust_birthwgt_file)
+# Transforming birthWgtCentile and creating the new column 'samplename'
+birthWgtCentile <- birthWgtCentile %>%
+  mutate(
+    samplename = case_when(
+      Study == "SCOPE" ~ "SCP",
+      Study == "STOP" ~ "STP",
+      TRUE ~ ""  # Fallback for other cases if necessary
+    ),
+    samplename = paste0(samplename, sprintf("%04d", Study.ID))
+  )
+
+# View the transformed data
+head(birthWgtCentile)
+
 ## Gene ID versus GeneSymbol
 gene_info <- read_csv(file = gene_info_file)
 
 ## Gene ID versus GeneSymbol
 gene_info <- read_csv(file = gene_info_file)
 gene_info <- gene_info[!duplicated(gene_info$ensembl_gene_id), ]
+
+# Gene lists from Julie with TFs and SFs
+gene_lists <- read_excel(input_gene_lists_file)
 
 ```
 
@@ -95,6 +126,7 @@ library(tidyr)
 library(knitr)
 
 summary_table <- metadata %>%
+  dplyr::left_join(., birthWgtCentile[,c("samplename", "Birthweight_centile")]) %>%
   group_by(sex_outcome, Sex) %>%
   summarise(
     # Maternal Age
@@ -116,6 +148,10 @@ summary_table <- metadata %>%
     `Birthweight (g) (Mean ± SD)` = sprintf("%.1f ± %.1f", 
                                             mean(Birthweight, na.rm = TRUE), 
                                             sd(Birthweight, na.rm = TRUE)),
+    # Birthweight Centile
+    `Birthweight Centile (Mean ± SD)` = sprintf("%.1f ± %.1f", 
+                                            mean(Birthweight_centile, na.rm = TRUE), 
+                                            sd(Birthweight_centile, na.rm = TRUE)),
                                             
     # Sample Size
     `N` = n()
@@ -127,6 +163,275 @@ print(t(summary_table[2,]))
 
 # Optional: Create a formatted kable table
 kable(t(summary_table))
+
+```
+
+# Metadata compare between groups
+- Not sure if we want this for the paper but here I will test te see if there are differences between groups for the metadata features we are interested in
+
+```{r}
+
+metadata_centile <- metadata %>%
+  dplyr::left_join(., birthWgtCentile[,c("samplename", "Birthweight_centile")])
+
+```
+
+## Maternal Age
+
+```{r}
+
+#-------------------------------------------------------------------------------#
+# Test maternal age - males
+#-------------------------------------------------------------------------------#
+
+# First, check normality and equal variance assumptions
+# Shapiro-Wilk test for normality
+shapiro_m_pe <- shapiro.test(metadata_centile$maternalAge[metadata_centile$sex_outcome == "M_PE"])
+shapiro_m_control <- shapiro.test(metadata_centile$maternalAge[metadata_centile$sex_outcome == "M_Control"])
+
+# Variance test
+var_test_m <- var.test(maternalAge ~ sex_outcome, 
+                     data = metadata_centile, 
+                     subset = sex_outcome %in% c("M_PE", "M_Control"))
+
+# Parametric test (if data is normally distributed)
+t_test_result_m <- t.test(maternalAge ~ sex_outcome, 
+                        data = metadata_centile,
+                        subset = sex_outcome %in% c("M_PE", "M_Control"))
+
+# Mean difference
+mean_difference_m <- t_test_result_m$estimate[2] - t_test_result_m$estimate[1]
+
+# P-value
+p_value <- t_test_result_m$p.value
+
+#-------------------------------------------------------------------------------#
+# Test maternal age - females
+#-------------------------------------------------------------------------------#
+
+# First, check normality and equal variance assumptions
+# Shapiro-Wilk test for normality
+shapiro_f_pe <- shapiro.test(metadata_centile$maternalAge[metadata_centile$sex_outcome == "F_PE"])
+shapiro_f_control <- shapiro.test(metadata_centile$maternalAge[metadata_centile$sex_outcome == "F_Control"])
+
+# Variance test
+var_test_f <- var.test(maternalAge ~ sex_outcome, 
+                     data = metadata_centile, 
+                     subset = sex_outcome %in% c("F_PE", "F_Control"))
+
+# Parametric test (if data is normally distributed)
+t_test_result_f <- t.test(maternalAge ~ sex_outcome, 
+                        data = metadata_centile,
+                        subset = sex_outcome %in% c("F_PE", "F_Control"))
+
+# Mean difference
+mean_difference_f <- t_test_result_f$estimate[2] - t_test_result_f$estimate[1]
+
+# P-value
+p_value_f <- t_test_result_f$p.value
+
+
+```
+
+## Maternal BMI
+
+```{r}
+
+#-------------------------------------------------------------------------------#
+# Test maternal bmi - males
+#-------------------------------------------------------------------------------#
+
+# First, check normality and equal variance assumptions
+# Shapiro-Wilk test for normality
+shapiro_m_pe <- shapiro.test(metadata_centile$BMI[metadata_centile$sex_outcome == "M_PE"])
+shapiro_m_control <- shapiro.test(metadata_centile$BMI[metadata_centile$sex_outcome == "M_Control"])
+
+# Variance test
+var_test_m <- var.test(BMI ~ sex_outcome, 
+                     data = metadata_centile, 
+                     subset = sex_outcome %in% c("M_PE", "M_Control"))
+
+# Parametric test (if data is normally distributed)
+t_test_result_m <- t.test(BMI ~ sex_outcome, 
+                        data = metadata_centile,
+                        subset = sex_outcome %in% c("M_PE", "M_Control"))
+
+# Mean difference
+mean_difference_m <- t_test_result_m$estimate[2] - t_test_result_m$estimate[1]
+
+# P-value
+p_value <- t_test_result$p.value
+
+#-------------------------------------------------------------------------------#
+# Test maternal bmi - females
+#-------------------------------------------------------------------------------#
+
+# First, check normality and equal variance assumptions
+# Shapiro-Wilk test for normality
+shapiro_f_pe <- shapiro.test(metadata_centile$BMI[metadata_centile$sex_outcome == "F_PE"])
+shapiro_f_control <- shapiro.test(metadata_centile$BMI[metadata_centile$sex_outcome == "F_Control"])
+
+# Variance test
+var_test_f <- var.test(BMI ~ sex_outcome, 
+                     data = metadata_centile, 
+                     subset = sex_outcome %in% c("F_PE", "F_Control"))
+
+# Parametric test (if data is normally distributed)
+t_test_result_f <- t.test(BMI ~ sex_outcome, 
+                        data = metadata_centile,
+                        subset = sex_outcome %in% c("F_PE", "F_Control"))
+
+# Mean difference
+mean_difference_f <- t_test_result_f$estimate[2] - t_test_result_f$estimate[1]
+
+# P-value
+p_value_f <- t_test_result_f$p.value
+
+
+```
+
+## Gestational Age
+
+```{r}
+
+#-------------------------------------------------------------------------------#
+# Test gestational age - males
+#-------------------------------------------------------------------------------#
+
+# First, check normality and equal variance assumptions
+# Shapiro-Wilk test for normality
+shapiro_m_pe <- shapiro.test(metadata_centile$GestationalAge[metadata_centile$sex_outcome == "M_PE"])
+shapiro_m_control <- shapiro.test(metadata_centile$GestationalAge[metadata_centile$sex_outcome == "M_Control"])
+
+# Variance test
+var_test <- var.test(GestationalAge ~ sex_outcome, 
+                     data = metadata_centile, 
+                     subset = sex_outcome %in% c("M_PE", "M_Control"))
+
+# Non-parametric test (if data is not normally distributed)
+wilcox_test_result <- wilcox.test(GestationalAge ~ sex_outcome,
+                                  data = metadata_centile,
+                                  subset = sex_outcome %in% c("M_PE", "M_Control"))
+
+#-------------------------------------------------------------------------------#
+# Test gestational age - females
+#-------------------------------------------------------------------------------#
+
+# First, check normality and equal variance assumptions
+# Shapiro-Wilk test for normality
+shapiro_f_pe <- shapiro.test(metadata_centile$GestationalAge[metadata_centile$sex_outcome == "F_PE"])
+shapiro_f_control <- shapiro.test(metadata_centile$GestationalAge[metadata_centile$sex_outcome == "F_Control"])
+
+# Variance test
+var_test_f <- var.test(GestationalAge ~ sex_outcome, 
+                     data = metadata_centile, 
+                     subset = sex_outcome %in% c("F_PE", "F_Control"))
+
+# Non-parametric test (if data is not normally distributed)
+wilcox_test_result_f <- wilcox.test(GestationalAge ~ sex_outcome,
+                                  data = metadata_centile,
+                                  subset = sex_outcome %in% c("F_PE", "F_Control"))
+
+```
+
+## Birthweight
+
+```{r}
+
+#-------------------------------------------------------------------------------#
+# Test birthweight - males
+#-------------------------------------------------------------------------------#
+
+# First, check normality and equal variance assumptions
+# Shapiro-Wilk test for normality
+shapiro_m_pe <- shapiro.test(metadata_centile$Birthweight[metadata_centile$sex_outcome == "M_PE"])
+shapiro_m_control <- shapiro.test(metadata_centile$Birthweight[metadata_centile$sex_outcome == "M_Control"])
+
+# Variance test
+var_test <- var.test(Birthweight ~ sex_outcome, 
+                     data = metadata_centile, 
+                     subset = sex_outcome %in% c("M_PE", "M_Control"))
+
+# Non-parametric test (if data is not normally distributed)
+wilcox_test_result <- wilcox.test(Birthweight ~ sex_outcome,
+                                  data = metadata_centile,
+                                  subset = sex_outcome %in% c("M_PE", "M_Control"))
+
+#-------------------------------------------------------------------------------#
+# Test birthweight - females
+#-------------------------------------------------------------------------------#
+
+# First, check normality and equal variance assumptions
+# Shapiro-Wilk test for normality
+shapiro_f_pe <- shapiro.test(metadata_centile$Birthweight[metadata_centile$sex_outcome == "F_PE"])
+shapiro_f_control <- shapiro.test(metadata_centile$Birthweight[metadata_centile$sex_outcome == "F_Control"])
+
+# Variance test
+var_test_f <- var.test(Birthweight ~ sex_outcome, 
+                     data = metadata_centile, 
+                     subset = sex_outcome %in% c("F_PE", "F_Control"))
+
+# Non-parametric test (if data is not normally distributed)
+wilcox_test_result_f <- wilcox.test(Birthweight ~ sex_outcome,
+                                  data = metadata_centile,
+                                  subset = sex_outcome %in% c("F_PE", "F_Control"))
+
+```
+
+## Birthweight Centile
+
+```{r}
+
+#-------------------------------------------------------------------------------#
+# Test birthweight centile - males
+#-------------------------------------------------------------------------------#
+
+# First, check normality and equal variance assumptions
+# Shapiro-Wilk test for normality
+shapiro_m_pe <- shapiro.test(metadata_centile$Birthweight_centile[metadata_centile$sex_outcome == "M_PE"])
+shapiro_m_control <- shapiro.test(metadata_centile$Birthweight_centile[metadata_centile$sex_outcome == "M_Control"])
+
+# Variance test
+var_test_m <- var.test(Birthweight_centile ~ sex_outcome, 
+                     data = metadata_centile, 
+                     subset = sex_outcome %in% c("M_PE", "M_Control"))
+
+# Parametric test (if data is normally distributed)
+t_test_result_m <- t.test(Birthweight_centile ~ sex_outcome, 
+                        data = metadata_centile,
+                        subset = sex_outcome %in% c("M_PE", "M_Control"))
+
+# Mean difference
+mean_difference_m <- t_test_result_m$estimate[2] - t_test_result_m$estimate[1]
+
+# P-value
+p_value <- t_test_result$p.value
+
+#-------------------------------------------------------------------------------#
+# Test maternal bmi - females
+#-------------------------------------------------------------------------------#
+
+# First, check normality and equal variance assumptions
+# Shapiro-Wilk test for normality
+shapiro_f_pe <- shapiro.test(metadata_centile$Birthweight_centile[metadata_centile$sex_outcome == "F_PE"])
+shapiro_f_control <- shapiro.test(metadata_centile$Birthweight_centile[metadata_centile$sex_outcome == "F_Control"])
+
+# Variance test
+var_test_f <- var.test(Birthweight_centile ~ sex_outcome, 
+                     data = metadata_centile, 
+                     subset = sex_outcome %in% c("F_PE", "F_Control"))
+
+# Parametric test (if data is normally distributed)
+t_test_result_f <- t.test(Birthweight_centile ~ sex_outcome, 
+                        data = metadata_centile,
+                        subset = sex_outcome %in% c("F_PE", "F_Control"))
+
+# Mean difference
+mean_difference_f <- t_test_result_f$estimate[2] - t_test_result_f$estimate[1]
+
+# P-value
+p_value_f <- t_test_result_f$p.value
+
 
 ```
 
@@ -232,6 +537,227 @@ dge_list_obj$samples$sex_outcome <- factor(dge_list_obj$samples$sex_outcome, lev
 # saveRDS(dge_list_obj,
 #         file = output_dgelist_58_file)
 ```
+
+# Clustering analysis
+
+```{r}
+# Load required libraries
+library(mclust)  # For model-based clustering
+library(tidyverse)  # For data manipulation
+
+
+# Ensure input is a valid DGEList object
+if (!inherits(dge_list_obj, "DGEList")) {
+  stop("Input 'dge_list_obj' must be a valid DGEList object.")
+}
+
+# 3. Transform counts to log-CPM (log Counts Per Million)
+logCPM <- edgeR::cpm(dge_list_obj, log = TRUE)  # Log-transform for normalization
+
+# 4. Perform model-based clustering using mclust
+# Mclust automatically selects the best number of clusters and model
+mclust_result <- Mclust(t(logCPM))
+
+# View the clustering summary
+summary(mclust_result)
+
+# 5. Visualize clustering results
+# (a) Plot the model-based clustering
+plot(mclust_result, what = "classification")  # Cluster assignment visualization
+plot(mclust_result, what = "BIC")             # BIC values for model selection
+
+# (b) Visualize clusters in PCA space
+pca <- prcomp(t(logCPM))  # Perform PCA on the transposed matrix
+clusters <- as.factor(mclust_result$classification)  # Cluster assignments
+
+
+pca_df <- data.frame(PC1 = pca$x[, 1],
+                     PC2 = pca$x[, 2],
+                     Cluster = clusters,
+                     samplename = rownames(pca$x)) %>%
+  dplyr::left_join(., metadata[, c("samplename", "sex_outcome")], by = "samplename")
+
+ggplot(pca_df, aes(x = PC1,
+                   y = PC2,
+                   color = Cluster,
+                   shape = sex_outcome)) +
+  geom_point(size = 3) +
+  geom_text_repel(aes(label = samplename),  # Use geom_text_repel for non-overlapping labels
+                  size = 3,             # Text size
+                  max.overlaps = Inf,   # Show all labels, even if overlapping
+                  show.legend = FALSE) + 
+  labs(title = "PCA of Clusters", x = "PC1", y = "PC2") +
+  theme_minimal()
+
+```
+## Correlate PCA and Mclust
+
+```{r}
+input_cibersortx_post_dedup_proportions_file <- file.path(projectDir, "deduplicated_clearBox/cibersortx_output/CIBERSORTx_Job10_Adjusted.txt")
+
+# import the post deduplication cibersortx proportions
+cibersort_proportions <- read.table(file = input_cibersortx_post_dedup_proportions_file,
+                               header = TRUE,
+                               sep = "\t") %>%
+  dplyr::select(samplename = Mixture, everything()) %>%
+  # remove the trailing "_dedup" from the samplename
+  dplyr::mutate(samplename = gsub("_dedup$", "", samplename)) %>%
+  # remove the stats we don't need
+  dplyr::select(., -'P.value', -'Correlation', -'RMSE') %>%
+  # keep only the 58 final samples
+  inner_join(metadata[, c("samplename")], by = "samplename")
+
+
+# Merge Mclust cluster information with cell type proportions
+cluster_proportions <- data.frame(
+  samplename = rownames(pca$x),
+  Cluster = as.factor(mclust_result$classification)
+) %>%
+  left_join(cibersort_proportions, by = "samplename")
+
+# Automatically select cell type columns
+cell_types <- names(cibersort_proportions)[!(names(cibersort_proportions) %in% c("samplename"))]
+
+# Prepare results storage
+anova_and_tukey_results <- list()
+
+# Perform ANOVA and Tukey's HSD for each cell type
+for(cell_type in cell_types) {
+  # ANOVA
+  aov_result <- aov(as.formula(paste(cell_type, "~ Cluster")), data = cluster_proportions)
+  
+  # Tukey's HSD test
+  tukey_result <- TukeyHSD(aov_result)
+  
+  # Prepare results
+  anova_summary <- summary(aov_result)
+  p_value <- anova_summary[[1]][["Pr(>F)"]][1]
+  
+  # Store results
+  anova_and_tukey_results[[cell_type]] <- list(
+    ANOVA_p_value = p_value,
+    Tukey_HSD = tukey_result$Cluster
+  )
+}
+
+# Prepare summary dataframe with individual adjusted p-values
+summary_results <- lapply(names(anova_and_tukey_results), function(cell_type) {
+  # Get Tukey HSD results
+  tukey_df <- as.data.frame(anova_and_tukey_results[[cell_type]]$Tukey_HSD)
+  tukey_df$comparison <- rownames(tukey_df)
+  tukey_df$cell_type <- cell_type
+  tukey_df$anova_p_value <- anova_and_tukey_results[[cell_type]]$ANOVA_p_value
+  
+  return(tukey_df)
+})
+
+# Combine results
+final_results <- do.call(rbind, summary_results)
+
+# Adjust p-values for multiple comparisons separately for each cell type
+final_results_adjusted <- do.call(rbind, lapply(split(final_results, final_results$cell_type), function(cell_type_df) {
+  cell_type_df$adjusted_p_value <- p.adjust(cell_type_df$`p adj`, method = "BH")
+  return(cell_type_df)
+}))
+
+# Filter for statistically significant comparisons
+significant_results <- final_results_adjusted[final_results_adjusted$adjusted_p_value < 0.05, ]
+
+# Print significant results
+print("Statistically Significant Cluster Differences:")
+print(significant_results)
+# Visualization of significant differences
+#output directory
+correlation_plots <- file.path(projectDir, "deduplicated_clearBox/output/correlation_plots")
+
+# Boxplot for cell types with significant cluster differences
+for(cell_type in unique(significant_results$cell_type)) {
+  p <- ggplot(cluster_proportions, aes_string(x = "Cluster", y = cell_type, fill = "Cluster")) +
+    geom_boxplot() +
+    labs(title = paste("Cell Type Proportions for", cell_type),
+         x = "Cluster", y = "Proportion") +
+    theme_minimal()
+  
+  ggsave(filename = paste0(correlation_plots, "/", cell_type, "_cluster_boxplot.jpg"), plot = p, 
+         width = 10, height = 6, dpi = 300)
+}
+
+
+# Correlation with PCA loadings
+# Extract first few principal components
+pca_loadings <- data.frame(
+  samplename = rownames(pca$x),
+  PC1 = pca$x[, 1],
+  PC2 = pca$x[, 2]
+) %>%
+  left_join(cibersort_proportions, by = "samplename")
+
+# Compute correlations between PCA loadings and cell type proportions
+cor_results <- lapply(cell_types, function(cell_type) {
+  # Correlation with PC1 and PC2
+  cor_pc1 <- cor.test(pca_loadings$PC1, pca_loadings[[cell_type]])
+  cor_pc2 <- cor.test(pca_loadings$PC2, pca_loadings[[cell_type]])
+  
+  data.frame(
+    CellType = cell_type,
+    PC1_correlation = cor_pc1$estimate,
+    PC1_p_value = cor_pc1$p.value,
+    PC2_correlation = cor_pc2$estimate,
+    PC2_p_value = cor_pc2$p.value
+  )
+})
+
+# Combine correlation results
+cor_df <- do.call(rbind, cor_results)
+cor_df$PC1_adjusted_p_value <- p.adjust(cor_df$PC1_p_value, method = "BH")
+cor_df$PC2_adjusted_p_value <- p.adjust(cor_df$PC2_p_value, method = "BH")
+
+# Print significant correlations
+print("Significant Correlations with PCA Loadings:")
+print(cor_df[cor_df$PC1_adjusted_p_value < 0.05 | cor_df$PC2_adjusted_p_value < 0.05, ])
+
+# Scatter plots of significant correlations
+significant_cell_types <- cor_df$CellType[cor_df$PC1_adjusted_p_value < 0.05 | cor_df$PC2_adjusted_p_value < 0.05]
+
+#output directory
+correlation_plots <- file.path(projectDir, "deduplicated_clearBox/output/correlation_plots")
+
+for(cell_type in significant_cell_types) {
+  # PC1 correlation plot
+  p1 <- ggplot(pca_loadings, aes_string(x = "PC1", y = cell_type)) +
+    geom_point() +
+    geom_smooth(method = "lm") +
+    labs(title = paste("PC1 vs", cell_type),
+         x = "PC1", y = paste(cell_type, "Proportion")) +
+    theme_minimal()
+  
+  # PC2 correlation plot
+  p2 <- ggplot(pca_loadings, aes_string(x = "PC2", y = cell_type)) +
+    geom_point() +
+    geom_smooth(method = "lm") +
+    labs(title = paste("PC2 vs", cell_type),
+         x = "PC2", y = paste(cell_type, "Proportion")) +
+    theme_minimal()
+  
+  # Save plots as PNG files
+  ggsave(
+    filename = file.path(correlation_plots, paste0(cell_type, "_PC1_correlation.jpg")), 
+    plot = p1, 
+    width = 10, 
+    height = 6, 
+    dpi = 300
+  )
+  
+  ggsave(
+    filename = file.path(correlation_plots, paste0(cell_type, "_PC2_correlation.jpg")), 
+    plot = p2, 
+    width = 10, 
+    height = 6, 
+    dpi = 300
+  )
+}
+```
+
 
 # Plot MDS
 
@@ -459,8 +985,8 @@ contrast_fit_sex_PE <- eBayes(contrast_fit_sex_PE)
 
 # grab the residuals
 res_post_dedup <- residuals(fit_sex_PE,voom_sex_PE)
-saveRDS(res_post_dedup,
-        file = file.path(outdir, "residuals.rds"))
+# saveRDS(res_post_dedup,
+#         file = file.path(outdir, "residuals.rds"))
 
 # grab the fitted values
 fitted_post_dedup <- fitted(fit_sex_PE)
@@ -469,8 +995,8 @@ saveRDS(fitted_post_dedup,
 
 # check the coefficients
 coefficients <- contrast_fit_sex_PE$coefficients
-saveRDS(coefficients,
-        file = file.path(outdir, "coefficients.rds"))
+# saveRDS(coefficients,
+#         file = file.path(outdir, "coefficients.rds"))
 dim(contrast_fit_sex_PE$coefficients)
 ```
 
@@ -486,8 +1012,8 @@ allTable_female_PE <- topTable(contrast_fit_sex_PE,
                              n = Inf,
                              sort = "p")
 # create output files and save
-write_csv(allTable_female_PE,
-          file=file.path(outdir, "allTable_female.csv"))
+# write_csv(allTable_female_PE,
+#           file=file.path(outdir, "allTable_female.csv"))
 
 # write_csv(allTable_female_PE,
 #           file="/media/sf_D_DRIVE/VM_Projects/20240723_compare_pre_post_dedup/allTable_female_post_dedup.csv")
@@ -498,8 +1024,8 @@ allTable_male_PE <- topTable(contrast_fit_sex_PE,
                              coef = "male_PE",
                              n = Inf,
                              sort = "p")
-write_csv(allTable_male_PE,
-          file=file.path(outdir, "allTable_male.csv"))
+# write_csv(allTable_male_PE,
+#           file=file.path(outdir, "allTable_male.csv"))
 
 # write_csv(allTable_male_PE,
 #           file="/media/sf_D_DRIVE/VM_Projects/20240723_compare_pre_post_dedup/allTable_male_post_dedup.csv")
@@ -512,13 +1038,13 @@ topTable_male_pe <- topTable(contrast_fit_sex_PE,
                              adjust.method = "fdr")
 
 # create output files and save
-write_csv(topTable_male_pe,
-          file="/home/smit1924/preeclampsia_sex_chromosome_informed/noCovariate_output/topTable_male_pe.csv")
+# write_csv(topTable_male_pe,
+#           file="/home/smit1924/preeclampsia_sex_chromosome_informed/noCovariate_output/topTable_male_pe.csv")
 
 # write out a few summary tables
 
 # Count occurrences for both conditions in a single pipeline
-seqname_counts <- allTable_male %>%
+seqname_counts <- allTable_male_PE %>%
   dplyr::filter(., adj.P.Val < 0.05) %>%
   mutate(condition = ifelse(logFC < 0, "down", "up")) %>%
   group_by(seqnames, condition) %>%
@@ -540,18 +1066,32 @@ df <- left_join(coeff_and_sigma_df,
                df,
                by="ensembl")
 
-write_csv(df %>% relocate(hgnc_symbol, .after=ensembl),
-          file=output_spreadsheet_file)
+# write_csv(df %>% relocate(hgnc_symbol, .after=ensembl),
+#           file=output_spreadsheet_file)
 
 df2 <- left_join(allTable_female_PE %>% dplyr::select(ensembl, hgnc_symbol, t, P.Value, adj.P.Val),
                allTable_male_PE %>% dplyr::select(ensembl, hgnc_symbol, t, P.Value, adj.P.Val),
                by=c('hgnc_symbol', 'ensembl'),
           suffix=c("_F", "_M"))
 
-write_csv(df2 %>% relocate(hgnc_symbol, .after=ensembl),
-          file=output_pValue_file)
+# write_csv(df2 %>% relocate(hgnc_symbol, .after=ensembl),
+#           file=output_pValue_file)
 
 ```
+
+# Identify transcription and splicing factors
+
+```{r}
+# add a new column indicating which genes are transcription factors
+allTable_male_PE_TFs_SFs <-  allTable_male_PE %>%
+  mutate(transcriptionFactor = ifelse(hgnc_symbol %in% gene_lists$Transcription_factors, "TF", NA))%>%
+  mutate(splicingFactor = ifelse(hgnc_symbol %in% gene_lists$Splicing_factors, "SF", NA))
+# identify which genes are both DE and TFs or SFs
+DE_TFs_SFs <- dplyr::filter(allTable_male_PE_TFs_SFs, 
+                       adj.P.Val < 0.05 & 
+                       (transcriptionFactor == "TF" | splicingFactor == "SF"))
+```
+
 
 ## Sanity plot of DE genes
 
@@ -650,7 +1190,73 @@ print(beeswarm)
 ```
 
 ## Volcano plot for visualisation of differential expression
-### male
+### male (for publication)
+
+```{r}
+# Create list of genes to label
+genes_to_label <- c("CP", "CDH13", "IGFBP7", "COL6A3", "VCAN", 
+                    "CSHL1", "ALPP", "NR3C2", "ELOVL6", "ITGA1", "ROBO1")
+
+# Ensure consistent axis limits
+max_fc <- max(abs(c(allTable_male_PE$logFC, allTable_female_PE$logFC)))
+max_y <- max(-log10(c(allTable_male_PE$P.Value, allTable_female_PE$P.Value)))
+
+# Function to create the "Differential Expression" factor
+make_de_factor <- function(df) {
+  factor(ifelse(df$adj.P.Val < 0.05,
+                ifelse(df$logFC > 0, "Up", "Down"),
+                "NS"),
+         levels = c("Up", "Down", "NS"))
+}
+
+# Define a consistent scale for color
+color_scale <- scale_color_manual(
+  values = c("Up" = "green4", "Down" = "red3", "NS" = "grey"),
+  labels = c("Up" = "Upregulated", "Down" = "Downregulated", "NS" = "Not Significant")
+)
+
+# Create the male plot
+p1 <- ggplot(allTable_male_PE, aes(x = logFC, y = -log10(P.Value))) +
+  geom_point(aes(color = make_de_factor(allTable_male_PE))) +
+    geom_text_repel(
+    data = subset(allTable_male_PE, hgnc_symbol %in% genes_to_label),
+    aes(label = hgnc_symbol),
+    max.overlaps = Inf,
+    box.padding = 0.5,
+    force = 2) +
+  color_scale +
+  scale_x_continuous(limits = c(-max_fc, max_fc), breaks = seq(-max_fc, max_fc, length.out = 9)) +
+  scale_y_continuous(limits = c(0, max_y)) +
+  labs(x = expression(log[2]~"Fold Change"),
+       y = expression(-log[10]~"P-value"),
+       title = "Male",
+       color = "Differential Expression") +
+  theme_bw()
+
+# Create the female plot
+p2 <- ggplot(allTable_female_PE, aes(x = logFC, y = -log10(P.Value))) +
+  geom_point(aes(color = make_de_factor(allTable_female_PE))) +
+  color_scale +
+  scale_x_continuous(limits = c(-max_fc, max_fc), breaks = seq(-max_fc, max_fc, length.out = 9)) +
+  scale_y_continuous(limits = c(0, max_y)) +
+  labs(x = expression(log[2]~"Fold Change"),
+       y = expression(-log[10]~"P-value"),
+       title = "Female") +  # No color legend
+  guides(color = "none") + # Suppress the legend
+  theme_bw()
+
+# Combine the plots and collect legends
+combined_plot <- (p1 + p2) +
+  plot_annotation(tag_levels = "a") +
+  plot_layout(guides = "collect") &
+  theme(legend.position = "bottom")
+
+# Display the combined plot
+print(combined_plot)
+
+
+```
+
 
 ```{r volcano plots male}
 
@@ -785,7 +1391,7 @@ volcano_female <- ggplot(data = FDR_FC_Decide,
   theme(legend.position="bottom")
 
 ggsave(plot = volcano_female,
-       filename = file.path(projectDir, "noCovariate_output/volcano_female.pdf"),
+       filename = file.path(projectDir, "deduplicated_clearBox/output/volcano_female.png"),
        units = "in",
        width = 12,
        height = 12,
@@ -794,7 +1400,108 @@ ggsave(plot = volcano_female,
 
 ```
 
-# Heatmaps
+# Pathway enrichment analysis
+
+```{r}
+# this pathway enrichment from (https://youtu.be/JPwdqdo_tRg?si=E9fEAQFJJoZE6MV1)
+genes_to_test <- topTable_male_pe[topTable_male_pe$adj.P.Val < 0.05,] %>%
+  dplyr::pull(., ensembl)
+
+GO_results <- clusterProfiler::enrichGO(gene = genes_to_test,
+                                        OrgDb = "org.Hs.eg.db",
+                                        keyType = "ENSEMBL",
+                                        ont = "BP")
+as.data.frame(GO_results)
+
+# this pathway enrichment from (https://youtu.be/4MZ2fEvTj0c)
+# Functions--------------------------------------------
+## Function: Adjacency matrix to list ##
+matrix_to_list <- function(pws){
+  pws.1 <- list()
+  for (pw in colnames(pws)) {
+    pws.1[[pw]] <- rownames(pws)[as.logical(pws[, pw])]
+  }
+  return(pws.1)
+}
+
+# Prepare data--------------------------------------------
+# create the table required for this tutorial from the full topTable
+df <- allTable_male_PE %>%
+  dplyr::select(., gene_symbol = hgnc_symbol, pval = P.Value, padj = adj.P.Val, log2fc = logFC)
+
+## Prepare background genes -------------------------------------
+## gene sets (.gmt files) downloaded from GSEA MSigDB
+# identify genes in the DE set to filter them from the gene sets of interest
+genes_in_data <- df$gene_symbol
+
+# create a list of gene set files (.gmt)
+gmt_files <- list.files(path = paste0(projectDir, "/deduplicated_clearBox/rawData"),
+                        pattern = '.gmt',
+                        full.names = TRUE)
+# import the .gmt files
+for (file in gmt_files){
+  pwl2 <- read.gmt(file) # all genes from db (C8: cell type signatures, H: Hallmark, C5 GO_BP, HP_MATERNAL_HYPERTENSION)
+  pwl2 <- pwl2[pwl2$gene %in% genes_in_data, ] # background gene sets (pathways_ already filtered for those genes that)
+  filename <- paste(gsub('c\\d+\\.', '', gsub('\\.v2024\\.1\\.Hs\\.symbols\\.gmt$', '', file)), '.RDS', sep = '') # tidy up the filenames
+	saveRDS(pwl2, filename)
+}
+
+# annotate according to differential expression
+df <- df %>%
+  dplyr::mutate(., diffexpressed = case_when(
+    log2fc > 0 & padj < 0.05 ~ 'UP',
+    log2fc < 0 & padj < 0.05 ~ 'DOWN',
+    padj >= 0.05 ~ 'NO'
+  ))
+
+# remove non-significant genes
+df <- df[df$diffexpressed != 'NO', ]
+
+# split the dataframe into a list of sub-dataframes: upregulated, downregulated genes
+deg_results_list <- split(df, df$diffexpressed)
+
+# Run ClusterProfiler--------------------------------------------
+# Settings
+bg_path <- file.path(projectDir, "deduplicated_clearBox/rawData/")
+name_of_comparison <- 'preeclampsia'
+background_genes <- 'go_bp'
+bg_genes <- readRDS(paste0(bg_path, "/h.all.RDS"))
+padj_cutoff <- 0.05
+genecount_cutoff <- 5
+filename <- paste0(outdir, '/clusterProfiler/', name_of_comparison, '_', background_genes)
+
+# Read in background genes (alternative)
+if(background_genes == 'hallmark_all'){
+  bg_genes <- readRDS(paste0(bg_path, 'h.all.RDS'))
+} else if(background_genes == 'cell_type'){
+  bg_genes <- readRDS(paste0(bg_path, 'c8_all.RDS'))
+} else if(background_genes == 'kegg'){
+  bg_genes <- readRDS(paste0(bg_path, 'cp.kegg_legacy.RDS'))
+} else if(background_genes == 'hypertension'){
+  bg_genes <- readRDS(paste0(bg_path, 'MATERNAL_HYPERTENSION.RDS'))
+} else if(background_genes == 'go_bp'){
+  bg_genes <- readRDS(paste0(bg_path, 'go.bp.RDS'))
+} else {
+  stop('Invalid background genes. Select one of the following: hallmark_all, cell_type, go_bp, hypertension, kegg or add new pwl to function')
+}
+
+# Run clusterProfiler on each sub-dataframe
+res <- lapply(names(deg_results_list),
+                 function(x) enricher(gene = deg_results_list[[x]]$gene_symbol,
+                                      TERM2GENE = bg_genes))
+names(res) <- names(deg_results_list)
+#Convert the list of enrichResults for each sample_pattern to a dataframe with the pathways
+res_df <- lapply(names(res), function(x) rbind(res[[x]]@result))
+names(res_df) <- names(res)
+res_df <- do.call(rbind, res_df)
+head(res_df)
+
+
+
+```
+
+
+## Heatmaps
 ```{r}
 # Modify ordering of the clusters using clustering callback option
 callback = function(hc, mat){
