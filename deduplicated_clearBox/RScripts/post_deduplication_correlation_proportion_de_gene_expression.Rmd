@@ -204,7 +204,7 @@ merged_data <- cibersortx_stats %>%
 
 # Exclude specific columns from analysis (P.value, Correlation, RMSE)
 filtered_data <- merged_data %>%
-  select(-P.value, -Correlation, -RMSE)
+  dplyr::select(-P.value, -Correlation, -RMSE)
 
 # Group by "Sex" and calculate mean and SD for each column
 result <- filtered_data %>%
@@ -222,6 +222,7 @@ t(result)
 ```
 
 # test cell-type proportions differences
+## Male
 - this uses the beta regression suggested in the Campbell _et al._ paper 
 
 ```{r}
@@ -266,7 +267,7 @@ cell_types <- c("Fetal.Mesenchymal.Stem.Cells", "CD14..Monocytes", "CD8..Activat
                 "Fetal.Syncytiotrophoblast", "Fetal.Fibroblasts", "Cytotrophoblast", "Fetal.Nucleated.Red.Blood.Cells", "Maternal.FCGR3A..Monocytes",
                 "Maternal.Plasma.Cells", "Fetal.Extravillous.Trophoblasts")
 
-# Filter metadata to exclude samples where Sex = "M"
+# Filter metadata to include samples where Sex = "M" (male)
 filtered_metadata <- metadata_quality %>%
   filter(Sex == "M")
 
@@ -299,7 +300,7 @@ final_results <- final_results %>%
     )
   )
 # Write the dataframe to an Excel file
-write_xlsx(final_results, out_file_oddsRatio_stats_male)
+# write_xlsx(final_results, out_file_oddsRatio_stats_male)
 
 # Updated ggplot code
 ggplot(final_results, aes(x = reorder(cell_type, odds_ratio), y = odds_ratio)) +
@@ -309,7 +310,7 @@ ggplot(final_results, aes(x = reorder(cell_type, odds_ratio), y = odds_ratio)) +
   geom_hline(yintercept = 1, linetype = "dashed") +
   scale_color_manual(values = c("Higher in PE" = "red", "Lower in PE" = "blue", "No significant difference" = "gray")) +
   scale_y_log10() +  # Use log scale for better visualization of ratios
-  labs(title = "Odds Ratios for Cell Type Proportions in Preeclampsia",
+  labs(title = "Odds Ratios for Cell Type Proportions in Preeclampsia (Male)",
        x = "Cell Type",
        y = "Odds Ratio (95% CI, log scale)",
        color = "Association with PE") +
@@ -322,14 +323,18 @@ ggplot(final_results, aes(x = reorder(cell_type, odds_ratio), y = odds_ratio)) +
 
 # Print a summary table
 summary_table <- final_results %>%
-  select(cell_type, odds_ratio, ci_lower, ci_upper, direction) %>%
+  dplyr::select(cell_type, odds_ratio, ci_lower, ci_upper, direction) %>%
   arrange(desc(odds_ratio))
 
 print(summary_table)
 
-##########################################################################################################################################
+```
 
-# Filter metadata to exclude samples where Sex = "M"
+## Female
+
+```{r}
+
+# Filter metadata to include samples where Sex = "F" (Female)
 filtered_metadata_F <- metadata_quality %>%
   filter(Sex == "F")
 
@@ -362,7 +367,7 @@ final_results_F <- final_results_F %>%
     )
   )
 # Write the dataframe to an Excel file
-write_xlsx(final_results_F, out_file_oddsRatio_stats_female)
+# write_xlsx(final_results_F, out_file_oddsRatio_stats_female)
 
 # Updated ggplot code
 ggplot(final_results_F,
@@ -391,6 +396,67 @@ summary_table_F <- final_results_F %>%
 
 print(summary_table_F)
 ```
+## Combined male and female plots
+
+```{r}
+# Determine the order of cell types based on descending odds ratio in male results
+cell_type_order <- final_results %>%
+  arrange(desc(odds_ratio)) %>%
+  pull(cell_type)
+
+# Ensure all cell types are included in both datasets and align the order
+all_cell_types <- unique(c(final_results$cell_type, final_results_F$cell_type))
+final_results <- final_results %>%
+  complete(cell_type = all_cell_types, fill = list(odds_ratio = NA, ci_lower = NA, ci_upper = NA, direction = "No significant difference")) %>%
+  mutate(cell_type = factor(cell_type, levels = cell_type_order))
+
+final_results_F <- final_results_F %>%
+  complete(cell_type = all_cell_types, fill = list(odds_ratio = NA, ci_lower = NA, ci_upper = NA, direction = "No significant difference")) %>%
+  mutate(cell_type = factor(cell_type, levels = cell_type_order))
+
+# Calculate a common x-axis range for the odds ratio
+common_x_limits <- range(c(final_results$ci_lower, final_results$ci_upper, final_results_F$ci_lower, final_results_F$ci_upper), na.rm = TRUE)
+
+# Generate the male plot
+male_plot <- ggplot(final_results, aes(x = cell_type, y = odds_ratio)) +
+  geom_point(aes(color = direction), size = 3) +
+  geom_errorbar(aes(ymin = ci_lower, ymax = ci_upper, color = direction), width = 0.2) +
+  coord_flip() +
+  geom_hline(yintercept = 1, linetype = "dashed") +
+  scale_color_manual(values = c("Higher in PE" = "red", "Lower in PE" = "blue", "No significant difference" = "gray")) +
+  scale_y_log10(limits = common_x_limits) +  # Apply common x-axis limits
+  labs(title = "Odds Ratios for Cell Type Proportions in Preeclampsia (Male)",
+       x = "Cell Type",
+       y = "Odds Ratio (95% CI, log scale)",
+       color = "Association with PE") +
+  theme_minimal() +
+  theme(axis.text.y = element_text(size = 8),
+        legend.position = "bottom")
+
+# Generate the female plot
+female_plot <- ggplot(final_results_F, aes(x = cell_type, y = odds_ratio)) +
+  geom_point(aes(color = direction), size = 3) +
+  geom_errorbar(aes(ymin = ci_lower, ymax = ci_upper, color = direction), width = 0.2) +
+  coord_flip() +
+  geom_hline(yintercept = 1, linetype = "dashed") +
+  scale_color_manual(values = c("Higher in PE" = "red", "Lower in PE" = "blue", "No significant difference" = "gray")) +
+  scale_y_log10(limits = common_x_limits) +  # Apply common x-axis limits
+  labs(title = "Odds Ratios for Cell Type Proportions in Preeclampsia (Female)",
+       x = "Cell Type",
+       y = "Odds Ratio (95% CI, log scale)",
+       color = "Association with PE") +
+  theme_minimal() +
+  theme(axis.text.y = element_text(size = 8),
+        legend.position = "bottom")
+
+# Print and save the plots
+print(male_plot)
+ggsave(paste0(outdir, "/cell_type_odds_ratios_PE_male.png"), width = 12, height = 10, dpi = 300)
+print(female_plot)
+ggsave(paste0(outdir, "/cell_type_odds_ratios_PE_female.png"), width = 12, height = 10, dpi = 300)
+
+```
+
 
 # Ridgeline plot of cell type proportions
 
@@ -540,6 +606,147 @@ ggplot(data = stacked_barchart_data,
 # dev.off()
 ```
 
+# PCA and correlate 
+
+```{r}
+input_cibersortx_post_dedup_proportions_file <- file.path(projectDir, "deduplicated_clearBox/cibersortx_output/CIBERSORTx_Job10_Adjusted.txt")
+
+# import the post deduplication cibersortx proportions
+cibersort_proportions <- read.table(file = input_cibersortx_post_dedup_proportions_file,
+                               header = TRUE,
+                               sep = "\t") %>%
+  dplyr::select(samplename = Mixture, everything()) %>%
+  # remove the trailing "_dedup" from the samplename
+  dplyr::mutate(samplename = gsub("_dedup$", "", samplename)) %>%
+  # remove the stats we don't need
+  dplyr::select(., -'P.value', -'Correlation', -'RMSE') %>%
+  # keep only the 58 final samples
+  inner_join(metadata[, c("samplename")], by = "samplename")
+
+
+# Merge Mclust cluster information with cell type proportions
+cluster_proportions <- data.frame(
+  samplename = rownames(pca$x),
+  Cluster = as.factor(mclust_result$classification)
+) %>%
+  left_join(cibersort_proportions, by = "samplename")
+
+# Perform statistical tests for each cell type
+# Using ANOVA to test if cell type proportions differ significantly across clusters
+cell_types <- names(cibersort_proportions)[!(names(cibersort_proportions) %in% c("samplename"))]  # automatically select all columns except 'samplename'
+
+anova_results <- lapply(cell_types, function(cell_type) {
+  # ANOVA test
+  aov_result <- aov(as.formula(paste(cell_type, "~ Cluster")), data = cluster_proportions)
+  summary_aov <- summary(aov_result)
+  
+  # Return p-value
+  data.frame(
+    CellType = cell_type,
+    p_value = summary_aov[[1]][["Pr(>F)"]][1]
+  )
+})
+
+# Combine ANOVA results
+anova_df <- do.call(rbind, anova_results)
+anova_df$adjusted_p_value <- p.adjust(anova_df$p_value, method = "BH")
+
+# Print significant cell types after multiple testing correction
+print("Cell Types Significantly Different Across Clusters:")
+print(anova_df[anova_df$adjusted_p_value < 0.05, ])
+
+# Visualization of cell type proportions across clusters
+library(ggplot2)
+library(tidyr)
+
+# Reshape data for plotting
+plot_data <- cluster_proportions %>%
+  pivot_longer(cols = cell_types, names_to = "CellType", values_to = "Proportion")
+
+# Boxplot of cell type proportions by cluster
+ggplot(plot_data, aes(x = Cluster, y = Proportion, fill = Cluster)) +
+  geom_boxplot() +
+  facet_wrap(~ CellType, scales = "free_y") +
+  labs(title = "Cell Type Proportions Across Mclust Clusters",
+       x = "Cluster", 
+       y = "Proportion") +
+  theme_minimal() +
+  theme(axis.text.x = element_text(angle = 45, hjust = 1))
+
+# Correlation with PCA loadings
+# Extract first few principal components
+pca_loadings <- data.frame(
+  samplename = rownames(pca$x),
+  PC1 = pca$x[, 1],
+  PC2 = pca$x[, 2]
+) %>%
+  left_join(cibersort_proportions, by = "samplename")
+
+# Compute correlations between PCA loadings and cell type proportions
+cor_results <- lapply(cell_types, function(cell_type) {
+  # Correlation with PC1 and PC2
+  cor_pc1 <- cor.test(pca_loadings$PC1, pca_loadings[[cell_type]])
+  cor_pc2 <- cor.test(pca_loadings$PC2, pca_loadings[[cell_type]])
+  
+  data.frame(
+    CellType = cell_type,
+    PC1_correlation = cor_pc1$estimate,
+    PC1_p_value = cor_pc1$p.value,
+    PC2_correlation = cor_pc2$estimate,
+    PC2_p_value = cor_pc2$p.value
+  )
+})
+
+# Combine correlation results
+cor_df <- do.call(rbind, cor_results)
+cor_df$PC1_adjusted_p_value <- p.adjust(cor_df$PC1_p_value, method = "BH")
+cor_df$PC2_adjusted_p_value <- p.adjust(cor_df$PC2_p_value, method = "BH")
+
+# Print significant correlations
+print("Significant Correlations with PCA Loadings:")
+print(cor_df[cor_df$PC1_adjusted_p_value < 0.05 | cor_df$PC2_adjusted_p_value < 0.05, ])
+
+# Scatter plots of significant correlations
+significant_cell_types <- cor_df$CellType[cor_df$PC1_adjusted_p_value < 0.05 | cor_df$PC2_adjusted_p_value < 0.05]
+
+#output directory
+correlation_plots <- file.path(projectDir, "deduplicated_clearBox/output/correlation_plots")
+
+for(cell_type in significant_cell_types) {
+  # PC1 correlation plot
+  p1 <- ggplot(pca_loadings, aes_string(x = "PC1", y = cell_type)) +
+    geom_point() +
+    geom_smooth(method = "lm") +
+    labs(title = paste("PC1 vs", cell_type),
+         x = "PC1", y = paste(cell_type, "Proportion")) +
+    theme_minimal()
+  
+  # PC2 correlation plot
+  p2 <- ggplot(pca_loadings, aes_string(x = "PC2", y = cell_type)) +
+    geom_point() +
+    geom_smooth(method = "lm") +
+    labs(title = paste("PC2 vs", cell_type),
+         x = "PC2", y = paste(cell_type, "Proportion")) +
+    theme_minimal()
+  
+  # Save plots as PNG files
+  ggsave(
+    filename = file.path(correlation_plots, paste0(cell_type, "_PC1_correlation.png")), 
+    plot = p1, 
+    width = 10, 
+    height = 6, 
+    dpi = 300
+  )
+  
+  ggsave(
+    filename = file.path(correlation_plots, paste0(cell_type, "_PC2_correlation.png")), 
+    plot = p2, 
+    width = 10, 
+    height = 6, 
+    dpi = 300
+  )
+}
+```
 
 # Correlate gene expression with cell-type proportions
 ## Include genes that are both DE and in the cibersortx signature matrix  
