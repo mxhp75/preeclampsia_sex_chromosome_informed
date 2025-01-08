@@ -36,6 +36,8 @@ library(ggbeeswarm)
 library(ggrepel)
 library(ggExtra)
 library(pheatmap)
+library(gridExtra)
+library(grid)
 
 ```
 
@@ -621,7 +623,7 @@ cibersort_proportions <- read.table(file = input_cibersortx_post_dedup_proportio
   # remove the stats we don't need
   dplyr::select(., -'P.value', -'Correlation', -'RMSE') %>%
   # keep only the 58 final samples
-  inner_join(metadata[, c("samplename")], by = "samplename")
+  inner_join(metadata_quality[, c("samplename")], by = "samplename")
 
 
 # Merge Mclust cluster information with cell type proportions
@@ -751,6 +753,7 @@ for(cell_type in significant_cell_types) {
 # Correlate gene expression with cell-type proportions
 ## Include genes that are both DE and in the cibersortx signature matrix  
 - I will use the tpm matrix for the correlation as this is the table that is input into Cibersortx. Might not make any difference.  
+- There are 43 genes that are both DE and in the signature matrix.  
 
 ```{r}
 
@@ -901,18 +904,18 @@ formatted_numbers <- apply(final_correlation_results_plot_male, 2, function(x) s
 
 dim_final_correlation_males <- dim(final_correlation_results) # 20 44
 
-png(file=file.path(outdir, "male_post_dedup_correlation_heatmap.png"),
-    width=14,
-    height=8,
-    units = "in",
-    res = 150)
+# png(file=file.path(outdir, "male_post_dedup_correlation_heatmap.png"),
+#     width=14,
+#     height=8,
+#     units = "in",
+#     res = 150)
 pheatmap(final_correlation_results_plot_male,
          cluster_rows = TRUE,
          cluster_cols = TRUE,
-  display_numbers = formatted_numbers,
-  number_fontsize = 9,
+  # display_numbers = formatted_numbers,
+  # number_fontsize = 9,
   main = "Correlations between expression of DE genes and cell types - Male")
-dev.off()
+# dev.off()
 ```
 
 ### All DE genes
@@ -933,12 +936,9 @@ rownames(tpm_bulkCountMatrix_all_genes_male) <- NULL
 tpm_bulkCountMatrix_all_genes_male %<>% tibble::column_to_rownames("hgnc_symbol")
 
 # overlap between signature and DE genes - this is used to cut down the number of genes tested for correlation
-## genes with 95% confidence
-# topTable_male <- dplyr::filter(allTable_male, adj.P.Val < 0.05)
-## genes with 80% confidence
-topTable_male <- dplyr::filter(allTable_male, adj.P.Val < 0.20)
+topTable_male <- dplyr::filter(allTable_male, adj.P.Val < 0.05)
 # sig_de_overlap <- subset(cibersortx_reduced_sigMatrix, GeneSymbol %in% topTable_male$hgnc_symbol)
-  
+
 
 # Initialize an empty data frame to store correlation results
 final_correlation_results <- data.frame(Cell_Type = names(cibersortx_post_dedup_proportions)[-1], stringsAsFactors = FALSE)
@@ -957,15 +957,15 @@ for (i in 1:nrow(topTable_male)) {
     tibble::column_to_rownames("samplename")
   
   tpm_GOI <- reshape2::melt(
-  subset(tpm_bulkCountMatrix_all_genes_male, rownames(tpm_bulkCountMatrix_all_genes_male) %in% topTable_male$hgnc_symbol[i]) %>%
-    tibble::rownames_to_column()
+    subset(tpm_bulkCountMatrix_all_genes_male, rownames(tpm_bulkCountMatrix_all_genes_male) %in% topTable_male$hgnc_symbol[i]) %>%
+      tibble::rownames_to_column()
   ) %>% 
     as.data.frame() %>% 
     set_colnames(c("ensembl", "samplename", paste0(topTable_male$ensembl[i]))) %>% 
     dplyr::select(., -ensembl) %>%
     dplyr::left_join(., cibersortx_post_dedup_proportions, by = "samplename") %>%
     dplyr::select(., -samplename)
-
+  
   # Calculate correlations between gene expression and cell type proportions for each cell type
   correlations <- lapply(colnames(tpm_GOI)[-1], function(cell_type) {
     cor(tpm_GOI[[1]], tpm_GOI[[cell_type]])
@@ -986,26 +986,19 @@ for (i in 1:nrow(topTable_male)) {
 # prepare the correlations for plotting
 final_correlation_results_plot_male <- final_correlation_results %>%
   mutate_all(~replace(., is.na(.), 0)) %>%
-    column_to_rownames("Cell_Type")
-
-write_csv(final_correlation_results,
-          file = out_final_correlation_results_80percent_file,
-          col_names = TRUE)
-
-# Format the numbers to two decimal places
-formatted_numbers <- apply(final_correlation_results_plot_male, 2, function(x) sprintf("%.2f", x))
+  column_to_rownames("Cell_Type")
 
 dim_final_correlation_males <- dim(final_correlation_results) # 20 44
 
 annotation_DE <- topTable_male %>%
-    mutate(DE_direction = case_when(
+  mutate(DE_direction = case_when(
     logFC > 0 ~ "up_regulated",
     logFC <= 0 ~ "down_regulated"
   )) %>%
   dplyr::select(., hgnc_symbol, DE_direction) %>%
   tibble::column_to_rownames("hgnc_symbol")
 
-# png(file=file.path(outdir, "male_post_dedup_correlation_heatmap_80percent_DE.png"),
+# png(file=file.path(outdir, "male_post_dedup_correlation_heatmap_all_DE.png"),
 #     width=14,
 #     height=8,
 #     units = "in",
@@ -1013,10 +1006,24 @@ annotation_DE <- topTable_male %>%
 pheatmap(final_correlation_results_plot_male,
          cluster_rows = TRUE,
          cluster_cols = TRUE,
+         treeheight_row = 0,   # This removes row dendrogram
+         show_colnames = FALSE, # This removes column names
+         annotation_col = annotation_DE,
+         main = "Correlations between expression of DE genes and cell types - Male")
+# dev.off()
+
+# First create the male heatmap and store the clustering information
+male_heatmap <- pheatmap(final_correlation_results_plot_male,
+         cluster_rows = TRUE,
+         cluster_cols = TRUE,
+         treeheight_row = 0,
          show_colnames = FALSE,
          annotation_col = annotation_DE,
-  main = "Correlations between expression of DE genes and cell types - Male")
-# dev.off()
+         main = "Correlations between expression of DE genes and cell types - Male")
+
+# Get the clustering order from the male heatmap
+male_row_order <- male_heatmap$tree_row$order
+male_col_order <- male_heatmap$tree_col$order
 ```
 
 
@@ -1126,10 +1133,11 @@ pheatmap(final_correlation_results_plot_female,
   main = "Correlations between expression of DE genes and cell types - Female")
 # dev.off()
 ```
+
 ### All DE genes
 
 ```{r}
-# create a vector of male sample IDs
+# create a vector of female sample IDs
 female_samplename <- metadata_quality %>%
   filter(Sex == "F") %>%
   pull(samplename)
@@ -1217,7 +1225,78 @@ pheatmap(final_correlation_results_plot_female,
          annotation_col = annotation_DE,
   main = "Correlations between expression of DE genes and cell types - Female")
 # dev.off()
+
 ```
+
+### Combined Male and Female Heatmaps
+
+```{r}
+# Create common parameters for both heatmaps to ensure consistency
+common_height <- 20  # Adjust this value as needed
+common_width <- 2   # Adjust this value as needed
+
+# First create and plot the male heatmap to get the clustering order
+male_heatmap <- pheatmap(final_correlation_results_plot_male,
+                         cluster_rows = TRUE,
+                         cluster_cols = TRUE,
+                         treeheight_row = 0,
+                         show_colnames = FALSE,
+                         annotation_col = annotation_DE,
+                         main = "Male",
+                         cellheight = common_height,
+                         cellwidth = common_width,
+                         silent = TRUE) # add or subtract the heatmap colour legend
+
+# Get the ordered row and column names from the male heatmap
+ordered_rows <- rownames(final_correlation_results_plot_male)[male_heatmap$tree_row$order]
+ordered_cols <- colnames(final_correlation_results_plot_male)[male_heatmap$tree_col$order]
+
+# Reorder the female matrix to match male ordering
+final_correlation_results_plot_female_ordered <- final_correlation_results_plot_female[ordered_rows, ordered_cols]
+
+# Create annotation dataframe with the correct ordering
+annotation_DE_ordered <- data.frame(
+  DE_direction = annotation_DE[ordered_cols, "DE_direction"],
+  row.names = ordered_cols
+)
+
+# Create female heatmap with matched ordering
+female_heatmap <- pheatmap(final_correlation_results_plot_female_ordered,
+                           cluster_rows = FALSE,
+                           cluster_cols = FALSE,
+                           treeheight_row = 0,
+                           show_colnames = FALSE,
+                           annotation_col = annotation_DE_ordered,
+                           main = "Female",
+                           cellheight = common_height,
+                           cellwidth = common_width,
+                           silent = FALSE) # add or subtract the heatmap colour legend
+
+
+# Align heatmaps at the bottom
+male_grob <- male_plot$gtable
+female_grob <- female_plot$gtable
+
+# Normalize the heights for alignment
+max_height <- grid::unit.pmax(male_grob$heights, female_grob$heights)
+male_grob$heights <- max_height
+female_grob$heights <- max_height
+
+# Combine the plots
+heatmap_combined <- grid.arrange(
+  male_grob, female_grob,
+  ncol = 2,
+  top = textGrob("Correlations between expression of DE genes and cell types", 
+                 gp = gpar(fontsize = 14, font = 2))
+)
+
+# Display the final plot
+print(final_plot)
+# Optional: save the plot
+ggsave(paste0(outdir, "/combined_heatmaps.png"), combined_plot, width = 18, height = 8, dpi = 300)
+
+```
+
 
 ## Compare cell type proportions and correlations between sex
 
