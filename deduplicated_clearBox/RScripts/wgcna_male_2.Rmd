@@ -70,6 +70,9 @@ output_module_traitsAll_cor_heatmap_file <- file.path(outdir, "module_traitsAll_
 output_correlation_heatmap_unmergedModules_file <- file.path(outdir, "module_to_module_cor_heatmap_unmergedModules.png")
 output_correlation_heatmap_mergedModules_file <- file.path(outdir, "module_to_module_cor_heatmap_mergedModules.png")
 
+output_wgcna_merged_modules_colours_file <- file.path(outdir, "wgcna_merged_modules_colours.rds")
+output_wgcna_datExpr_file <- file.path(outdir, "wgcna_datExpr.rds")
+
 ```
 
 # Import all input data tables
@@ -343,6 +346,8 @@ lcpm <- edgeR::cpm(male_dgeList, log = TRUE)
 
 # 2. Transpose the data for WGCNA (genes should be in columns, samples in rows)
 datExpr <- t(lcpm)
+## Save a copy of the datExpr object for gene ontology analysis
+write_rds(datExpr, output_wgcna_datExpr_file)
 
 # 3. Check for good genes and samples (optional but recommended)
 gsg <- goodSamplesGenes(datExpr, verbose = 3)
@@ -530,6 +535,11 @@ merge <- mergeCloseModules(datExpr,
                            verbose = 3)
 
 mergedColours <- merge$colors
+
+# save the merged colours for gene ontology analysis
+write_rds(mergedColours,
+          output_wgcna_merged_modules_colours_file)
+
 # how many modules do we have?
 length(table(mergedColours))
 
