@@ -1,0 +1,224 @@
+---
+title: "wgcna_GO"
+author: "Melanie Smith"
+date: "15 January 2025"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+# Load required libraries
+
+```{r}
+# Load necessary libraries
+library(WGCNA)
+library(clusterProfiler)
+library(org.Hs.eg.db)  # Replace with appropriate organism database (e.g., org.Mm.eg.db for mouse)
+library(enrichplot)    # For visualization
+library(DOSE)          # For GO semantic similarity
+library(GOSemSim)      # For GO semantic reduction
+library(simplifyEnrichment) # For GO semantic reduction
+library(rrvgo)
+
+
+```
+
+# Set directories and paths
+
+```{r}
+
+outdir <- file.path("/home/smit1924/preeclampsia_sex_chromosome_informed/deduplicated_clearBox/output")
+input_wgcna_merged_modules_colours_file <- file.path(outdir, "wgcna_merged_modules_colours.rds")
+input_wgcna_datExpr_file <- file.path(outdir, "wgcna_datExpr.rds")
+```
+
+# Import required files
+
+```{r}
+moduleColours <- readRDS(input_wgcna_merged_modules_colours_file)
+datExpr <- readRDS(input_wgcna_datExpr_file)
+
+```
+
+
+```{r}
+
+# Step 1: Load your WGCNA results and extract module genes
+
+geneNames <- colnames(datExpr)  # Replace `datExpr` with your expression data
+
+# Organize genes by module
+modules <- split(geneNames, moduleColours)
+
+# Step 2: Perform GO enrichment for each module
+go_results <- list()  # Store results for all modules
+
+for (module in names(modules)) {
+  cat("Analyzing module:", module, "\n")
+  genes <- modules[[module]]  # Get genes for this module
+  
+  # Convert gene names to Entrez IDs (or use appropriate ID type)
+  entrez_ids <- bitr(genes, fromType = "SYMBOL", toType = "ENTREZID", OrgDb = org.Hs.eg.db)$ENTREZID
+  
+  # Perform GO enrichment
+  go_enrich <- enrichGO(
+    gene          = entrez_ids,
+    OrgDb         = org.Hs.eg.db,
+    keyType       = "ENTREZID",
+    ont           = "BP",  # Biological Process; can also use "MF" (Molecular Function) or "CC" (Cellular Component)
+    pAdjustMethod = "BH",
+    pvalueCutoff  = 0.05,
+    qvalueCutoff  = 0.05
+  )
+  
+  # Save the result
+  go_results[[module]] <- go_enrich
+}
+
+# Step 3: Summarize and visualize results
+for (module in names(go_results)) {
+  cat("Processing module:", module, "\n")
+  
+  # Retrieve results
+  go_enrich <- go_results[[module]]
+  
+  # Check if go_enrich is NULL or empty
+  if (is.null(go_enrich)) {
+    cat("No enrichment results available for module:", module, "\n")
+    next
+  }
+  
+  # Check if there are any significant results
+  if (!is(go_enrich, "enrichResult") || nrow(go_enrich@result) == 0) {
+    cat("No significantly enriched terms found for module:", module, "\n")
+    next
+  }
+  
+  # Create plots only if there are significant results
+  tryCatch({
+    # # Barplot
+    # print(barplot(go_enrich, showCategory = 10,
+    #              title = paste("GO Enrichment - Module", module)))
+    # 
+    # # Dotplot
+    # print(dotplot(go_enrich, showCategory = 10,
+    #              title = paste("GO Enrichment - Module", module)))
+    
+    # Enrichment map
+    if (nrow(go_enrich@result) > 1) {
+      print(emapplot(pairwise_termsim(go_enrich), 
+                    title = paste("GO Enrichment Map - Module", module)))
+    } else {
+      cat("Skipping enrichment map for module:", module, "- insufficient enriched terms.\n")
+    }
+  }, error = function(e) {
+    cat("Error plotting results for module:", module, "\n")
+    cat("Error message:", conditionMessage(e), "\n")
+  })
+}
+
+
+# Step 4: Save results to a file
+for (module in names(go_results)) {
+  write.csv(
+    as.data.frame(go_results[[module]]),
+    file = file.path(outdir, paste0("wgcna/GO_Enrichment_Module_", module, ".csv")),
+    row.names = FALSE
+  )
+}
+
+# First, print diagnostic information
+for (module in names(go_results)) {
+  cat("Module:", module, "\n")
+  if (!is.null(go_results[[module]]) && is(go_results[[module]], "enrichResult")) {
+    cat("  Number of results:", nrow(go_results[[module]]@result), "\n")
+  } else {
+    cat("  Invalid or NULL result\n")
+  }
+}
+
+# Now combine results with proper error handling
+valid_results <- list()
+
+for (module in names(go_results)) {
+  # Check if the result exists and has rows
+  if (!is.null(go_results[[module]]) && 
+      is(go_results[[module]], "enrichResult") && 
+      nrow(go_results[[module]]@result) > 0) {
+    
+    # Directly access the result slot instead of using as.data.frame
+    result <- go_results[[module]]@result
+    result$Module <- module
+    valid_results[[module]] <- result
+  } else {
+    cat("Skipping module", module, "- no enrichment results\n")
+  }
+}
+
+# Only combine if we have valid results
+if (length(valid_results) > 0) {
+  combined_results <- do.call(rbind, valid_results)
+  cat("Successfully combined results from", length(valid_results), "modules\n")
+  
+  # Print dimensions of final result
+  cat("Final dimensions:", nrow(combined_results), "rows by", 
+      ncol(combined_results), "columns\n")
+} else {
+  stop("No valid enrichment results found in any module")
+}
+# Save the combined results
+# write.csv(combined_results, file = file.path(outdir, "wgcna/Combined_GO_Enrichment_Results.csv"), row.names = FALSE)
+
+# Save only significant results
+combined_results_sig <- dplyr::filter(combined_results, p.adjust < 0.05)
+# write.csv(combined_results_sig, file = file.path(outdir, "wgcna/Combined_GO_Enrichment_Results_sig.csv"), row.names = FALSE)
+```
+
+# Semantic reduction of GO terms
+## Prepare GO data
+```{r}
+# Assuming combined_results is a data frame with columns "GO_ID" and "p.adjust"
+go_terms <- combined_results$ID
+p_values <- combined_results$p.adjust
+```
+
+## Calculate semantic similarity
+```{r}
+# Compute semantic similarity
+go_similarity <- GOSemSim::termSim(go_terms, go_terms, 
+                                   semData = GOSemSim::godata("org.Hs.eg.db", ont = "BP"))
+```
+
+## Cluster and reduce redundent GO terms
+```{r}
+# Using simplifyEnrichment for clustering and visualization
+reduced_terms <- simplifyEnrichment::simplifyGO(go_similarity, labels = go_terms)
+
+# Using clusterProfiler for a simpler approach to redundancy reduction
+reduced_results <- clusterProfiler::simplify(combined_results, cutoff = 0.7, by = "p.adjust")
+
+```
+
+## Visualise results
+```{r}
+# Barplot of reduced terms
+clusterProfiler::barplot(reduced_results, showCategory = 10, title = "Reduced GO Terms")
+
+# Dotplot of reduced terms
+clusterProfiler::dotplot(reduced_results, showCategory = 10, title = "Reduced GO Terms")
+
+```
+
+## Save reduced results
+```{r}
+# Save reduced results to a CSV file
+write.csv(reduced_results, "Reduced_GO_Terms.csv", row.names = FALSE)
+
+```
+
+
+
+
+
