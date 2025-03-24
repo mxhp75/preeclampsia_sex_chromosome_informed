@@ -24,6 +24,7 @@ library(ggrepel)
 library(pheatmap)
 
 # set project directory
+# projectDir <- "/home/smit1924/preeclampsia_sex_chromosome_informed"
 projectDir <- "D:/VM_Projects/preeclampsia_sex_chromosome_informed"
 
 expt_name <- 'cibersortx_de'
