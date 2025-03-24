@@ -29,6 +29,7 @@ library(stringr)
 library(edgeR)
 library(readxl)
 library(readr)
+library(writexl)
 library(magrittr)
 library(tibble)
 library(ggplot2)
@@ -43,7 +44,8 @@ library(grid)
 
 ```{r}
 # set project directory
-projectDir <- "/home/smit1924/preeclampsia_sex_chromosome_informed"
+# projectDir <- "/home/smit1924/preeclampsia_sex_chromosome_informed"
+projectDir <- "D:/VM_Projects/preeclampsia_sex_chromosome_informed"
 
 # file paths for files to be imported
 
@@ -59,7 +61,7 @@ input_cibersortx_sigMatrix_file <- file.path(projectDir, "cibersortx_reduced_sig
 
 
 # file paths for output files
-outdir <- file.path("/media/sf_D_DRIVE/VM_Projects/20240619_deduplicateBams/plots")
+outdir <- file.path(projectDir, "deduplicated_clearBox/output")
 
 out_final_correlation_results_80percent_file <- file.path(projectDir, "deduplicated_clearBox/output/final_correlation_results_80percent.csv")
 out_file_cibersortx_stats <- file.path(projectDir, "cibersortx_stats.xlsx")
@@ -121,8 +123,10 @@ dim(cibersortx_reduced_sigMatrix)
 
 ```
 
+# Statistical tests between groups
+
 ```{r}
-# differnce on GA between all PE and Control
+# difference on GA between all PE and Control (sex naive)
 t_test_result <- t.test(GestationalAge ~ Outcome, data = metadata_quality)
 # Mean difference
 mean_difference <- t_test_result$estimate[2] - t_test_result$estimate[1]
@@ -153,8 +157,7 @@ p_value_female <- t_test_result_female$p.value
 
 ```
 
-
-## CIBERSORTx outcome data for the paper
+# CIBERSORTx outcome data for the paper
 
 ```{r}
 
@@ -163,16 +166,14 @@ cibersortx_stats <- read.table(file = input_cibersortx_post_dedup_proportions_fi
                                header = TRUE,
                                sep = "\t") %>%
   dplyr::select(samplename = Mixture, everything()) %>%
-   # remove the traiing "_dedup" from the samplename
+   # remove the trailing "_dedup" from the samplename
   dplyr::mutate(samplename = gsub("_dedup$", "", samplename)) %>%
   # keep only the 58 final samples
   inner_join(metadata_quality[, c("samplename")], by = "samplename")
 
 # save a table of cibersortx output for the paper
-library(writexl)
-
 # Write the dataframe to an Excel file
-write_xlsx(cibersortx_stats, out_file_cibersortx_stats)
+# write_xlsx(cibersortx_stats, out_file_cibersortx_stats)
 
 # Calculate the mean and standard deviation for the `Correlation` column
 correlation_mean <- mean(cibersortx_stats$Correlation, na.rm = TRUE)
@@ -264,10 +265,7 @@ perform_beta_regression <- function(cell_type, data) {
 
 # List of cell type columns
 cell_types <- c("Fetal.Mesenchymal.Stem.Cells", "CD14..Monocytes", "CD8..Activated.T.Cells", "Naive.CD4..T.Cells",
-                "Naive.CD8..T.Cells", "Natural.Killer.T.Cells", "B.Cells", "Fetal.GZMK..Natural.Killer", "Fetal.Memory.CD4..T.Cells",
-                "Fetal.Hofbauer.Cells", "Fetal.Plasmacytoid.Dendritic.Cells", "Fetal.GZMB..Natural.Killer", "Fetal.Endothelial.Cells",
-                "Fetal.Syncytiotrophoblast", "Fetal.Fibroblasts", "Cytotrophoblast", "Fetal.Nucleated.Red.Blood.Cells", "Maternal.FCGR3A..Monocytes",
-                "Maternal.Plasma.Cells", "Fetal.Extravillous.Trophoblasts")
+                "Naive.CD8..T.Cells", "Natural.Killer.T.Cells", "B.Cells", "Fetal.GZMK..Natural.Killer", "Fetal.Memory.CD4..T.Cells", "Fetal.Hofbauer.Cells", "Fetal.Plasmacytoid.Dendritic.Cells", "Fetal.GZMB..Natural.Killer", "Fetal.Endothelial.Cells", "Fetal.Syncytiotrophoblast", "Fetal.Fibroblasts", "Cytotrophoblast", "Fetal.Nucleated.Red.Blood.Cells", "Maternal.FCGR3A..Monocytes", "Maternal.Plasma.Cells", "Fetal.Extravillous.Trophoblasts")
 
 # Filter metadata to include samples where Sex = "M" (male)
 filtered_metadata <- metadata_quality %>%
@@ -305,7 +303,7 @@ final_results <- final_results %>%
 # write_xlsx(final_results, out_file_oddsRatio_stats_male)
 
 # Updated ggplot code
-ggplot(final_results, aes(x = reorder(cell_type, odds_ratio), y = odds_ratio)) +
+ggplot(final_results, aes(x = reorder(cell_type, desc(odds_ratio)), y = odds_ratio)) +
   geom_point(aes(color = direction), size = 3) +
   geom_errorbar(aes(ymin = ci_lower, ymax = ci_upper, color = direction), width = 0.2) +
   coord_flip() +
@@ -373,14 +371,14 @@ final_results_F <- final_results_F %>%
 
 # Updated ggplot code
 ggplot(final_results_F,
-       aes(x = reorder(cell_type, odds_ratio), y = odds_ratio)) +
+       aes(x = reorder(cell_type, desc(odds_ratio)), y = odds_ratio)) +
   geom_point(aes(color = direction), size = 3) +
   geom_errorbar(aes(ymin = ci_lower, ymax = ci_upper, color = direction), width = 0.2) +
   coord_flip() +
   geom_hline(yintercept = 1, linetype = "dashed") +
   scale_color_manual(values = c("Higher in PE" = "red", "Lower in PE" = "blue", "No significant difference" = "gray")) +
   scale_y_log10() +  # Use log scale for better visualization of ratios
-  labs(title = "Odds Ratios for Cell Type Proportions in Preeclampsia",
+  labs(title = "Odds Ratios for Cell Type Proportions in Preeclampsia (Female)",
        x = "Cell Type",
        y = "Odds Ratio (95% CI, log scale)",
        color = "Association with PE") +
@@ -398,26 +396,46 @@ summary_table_F <- final_results_F %>%
 
 print(summary_table_F)
 ```
+
 ## Combined male and female plots
 
 ```{r}
-# Determine the order of cell types based on descending odds ratio in male results
+# Ensure all cell types are included in both datasets
+all_cell_types <- unique(c(final_results$cell_type, final_results_F$cell_type))
+
+# Determine the order of cell types based on descending odds ratio in male results,
+# but include all cell types (placing missing ones at the end)
 cell_type_order <- final_results %>%
   arrange(desc(odds_ratio)) %>%
-  pull(cell_type)
+  pull(cell_type) %>%
+  unique()  # Ensure unique values
+
+# Add missing cell types to the order, placing them at the end
+cell_type_order <- c(cell_type_order, setdiff(all_cell_types, cell_type_order))
 
 # Ensure all cell types are included in both datasets and align the order
-all_cell_types <- unique(c(final_results$cell_type, final_results_F$cell_type))
 final_results <- final_results %>%
-  complete(cell_type = all_cell_types, fill = list(odds_ratio = NA, ci_lower = NA, ci_upper = NA, direction = "No significant difference")) %>%
+  complete(cell_type = all_cell_types,
+           fill = list(odds_ratio = NA,
+                       ci_lower = NA,
+                       ci_upper = NA,
+                       direction = "No significant difference")) %>%
   mutate(cell_type = factor(cell_type, levels = cell_type_order))
 
 final_results_F <- final_results_F %>%
-  complete(cell_type = all_cell_types, fill = list(odds_ratio = NA, ci_lower = NA, ci_upper = NA, direction = "No significant difference")) %>%
+  complete(cell_type = all_cell_types,
+           fill = list(odds_ratio = NA,
+                       ci_lower = NA,
+                       ci_upper = NA,
+                       direction = "No significant difference")) %>%
   mutate(cell_type = factor(cell_type, levels = cell_type_order))
 
 # Calculate a common x-axis range for the odds ratio
-common_x_limits <- range(c(final_results$ci_lower, final_results$ci_upper, final_results_F$ci_lower, final_results_F$ci_upper), na.rm = TRUE)
+common_x_limits <- range(c(final_results$ci_lower,
+                           final_results$ci_upper,
+                           final_results_F$ci_lower,
+                           final_results_F$ci_upper),
+                         na.rm = TRUE)
 
 # Generate the male plot
 male_plot <- ggplot(final_results, aes(x = cell_type, y = odds_ratio)) +
@@ -453,9 +471,9 @@ female_plot <- ggplot(final_results_F, aes(x = cell_type, y = odds_ratio)) +
 
 # Print and save the plots
 print(male_plot)
-ggsave(paste0(outdir, "/cell_type_odds_ratios_PE_male.png"), width = 12, height = 10, dpi = 300)
+ggsave(paste0(outdir, "/cell_type_odds_ratios_PE_male.pdf"), width = 12, height = 10, dpi = 300)
 print(female_plot)
-ggsave(paste0(outdir, "/cell_type_odds_ratios_PE_female.png"), width = 12, height = 10, dpi = 300)
+ggsave(paste0(outdir, "/cell_type_odds_ratios_PE_female.pdf"), width = 12, height = 10, dpi = 300)
 
 ```
 
