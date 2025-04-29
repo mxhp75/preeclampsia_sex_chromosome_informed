@@ -9,7 +9,9 @@ library(tidyr)  # For pivot_longer()
 library(readr) # for reading and writing data
 
 # set project directory
-projectDir <- "/home/smit1924/preeclampsia_sex_chromosome_informed"
+
+# projectDir <- "/home/smit1924/preeclampsia_sex_chromosome_informed"
+projectDir <- "D:/VM_Projects/preeclampsia_sex_chromosome_informed"
 
 # set the output directory
 outdir <- file.path(projectDir, "deduplicated_clearBox/output/58_sample_noCovariate")
@@ -51,6 +53,7 @@ df <- left_join(allTable_female_PE %>% dplyr::select(-t, -P.Value, -B),
 
 # Calculate the maximum absolute value across both logFC columns for symmetric axis scaling
 max_abs_fc <- max(abs(c(df$logFC_M, df$logFC_F)), na.rm = TRUE)
+max_female_fc <- max(abs(df$logFC_F), na.rm = TRUE)
 
 # Create the scatter plot
 p <- ggplot(df, aes(x = logFC_M, y = logFC_F)) +
@@ -76,9 +79,9 @@ p <- ggplot(df, aes(x = logFC_M, y = logFC_F)) +
   scale_x_continuous(limits = c(-max_abs_fc, max_abs_fc), 
                      breaks = seq(floor(-max_abs_fc), ceiling(max_abs_fc), 0.5),
                      minor_breaks = seq(floor(-max_abs_fc), ceiling(max_abs_fc), 0.1)) +
-  scale_y_continuous(limits = c(-max_abs_fc, max_abs_fc), 
-                     breaks = seq(floor(-max_abs_fc), ceiling(max_abs_fc), 0.5),
-                     minor_breaks = seq(floor(-max_abs_fc), ceiling(max_abs_fc), 0.1)) +
+  scale_y_continuous(limits = c(-max_female_fc, max_female_fc), 
+                     breaks = seq(floor(-max_female_fc), ceiling(max_female_fc), 0.5),
+                     minor_breaks = seq(floor(-max_female_fc), ceiling(max_female_fc), 0.1)) +
   # Add reference lines at x=0 and y=0
   geom_hline(yintercept = 0, linetype = "dashed", color = "grey50") +
   geom_vline(xintercept = 0, linetype = "dashed", color = "grey50") +
@@ -86,7 +89,7 @@ p <- ggplot(df, aes(x = logFC_M, y = logFC_F)) +
   labs(
     title = "Differential Gene Expression: Male vs Female",
     x = expression(log[2]~"Fold Change (Male)"),
-    y = expression(log[2]~"Fold Change (Female")
+    y = expression(log[2]~"Fold Change (Female)")
   ) +
   # Use a clean theme
   theme_bw() +
@@ -96,13 +99,13 @@ p <- ggplot(df, aes(x = logFC_M, y = logFC_F)) +
 # Display the plot
 print(p)
 
-# ggsave(filename = file.path(outdir, "melissaPlots/logFC_M_v_logFC_M.jpeg"),
-#        create.dir = TRUE,
-#        plot = p,
-#        units = "in",
-#        width = 10,
-#        height = 10,
-#        dpi = 150)
+ggsave(filename = file.path(outdir, "melissaPlots/logFC_M_v_logFC_M.pdf"),
+       create.dir = TRUE,
+       plot = p,
+       units = "in",
+       width = 10,
+       height = 10,
+       dpi = 300)
 
 ## violin plots of selected DE genes ##
 
@@ -112,7 +115,7 @@ print(p)
 # Step 1: Reshape log2CPM from wide to long format
 
 # import the log2CPM file
-log2CPM <- read_csv("/home/smit1924/preeclampsia_sex_chromosome_informed/deduplicated_clearBox/output/58_sample_noCovariate/log2CPM.csv")
+log2CPM <- read_csv(file.path(projectDir, "/deduplicated_clearBox/output/58_sample_noCovariate/log2CPM.csv"))
 # convert to long form
 log2CPM_long <- log2CPM %>%
   as.data.frame() %>%
@@ -227,7 +230,8 @@ combinedVolcano_plot <- (p1 + p2) +
 # Display the combined plot
 print(combinedVolcano_plot)
 
-# ggsave(filename = file.path(outdir, paste0("finalManuscriptPlots/", "combinedVolcano.jpeg")),
+
+# ggsave(filename = file.path(outdir, paste0("finalManuscriptPlots/", "combinedVolcano.pdf")),
 #        create.dir = TRUE,
 #        plot = combinedVolcano_plot,
 #        units = "in",
@@ -327,6 +331,7 @@ plot_data <- plot_data %>%
     TRUE ~ NA_character_  # This handles any unexpected values
   )) %>%
   dplyr::mutate(., new_sex_outcome = factor(new_sex_outcome, levels = c("F_Un", "F_PE", "M_Un", "M_PE")))
+
 # create the new plot
 p6 <- ggplot(subset(plot_data, hgnc_symbol %in% c(upReg_genes, downReg_genes)), # subset the long gene expression to only include DE GOI
              aes(x = new_sex_outcome,
@@ -344,14 +349,6 @@ p6 <- ggplot(subset(plot_data, hgnc_symbol %in% c(upReg_genes, downReg_genes)), 
   theme(legend.position = "none")
 
 ggsave(filename = file.path(outdir, paste0("finalManuscriptPlots/", "all_DE_violins.jpeg")),
-       create.dir = TRUE,
-       plot = p6,
-       units = "in",
-       width = 30,
-       height = 15,
-       dpi = 300)
-
-ggsave(filename = file.path(outdir, paste0("finalManuscriptPlots/", "all_DE_violins.pdf")),
        create.dir = TRUE,
        plot = p6,
        units = "in",

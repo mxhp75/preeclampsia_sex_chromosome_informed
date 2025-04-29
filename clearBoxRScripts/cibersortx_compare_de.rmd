@@ -24,8 +24,8 @@ library(ggrepel)
 library(pheatmap)
 
 # set project directory
-projectDir <- "/home/smit1924/preeclampsia_sex_chromosome_informed"
-# projectDir <- "/Users/pillmaka/Desktop/Melanie/drive-download"
+# projectDir <- "/home/smit1924/preeclampsia_sex_chromosome_informed"
+projectDir <- "D:/VM_Projects/preeclampsia_sex_chromosome_informed"
 
 expt_name <- 'cibersortx_de'
 
@@ -39,8 +39,8 @@ allTable_male_file <- file.path(projectDir, "noCovariate_output/allTable_male.cs
 topTable_male_file <- file.path(projectDir, "noCovariate_output/topTable_male_pe.csv")
 gene_info_file <- file.path(projectDir, "clearBoxRawData/gene_id_vs_symbol.csv")
 
-cibersortx_proportion_file <- file.path(projectDir, "cibersortx/outdir/CIBERSORTx_Adjusted.txt")
-cibersortx_sigMatrix_file <- file.path(projectDir, "cibersortx/outdir/CIBERSORTx_sigmatrix_Adjusted.txt")
+cibersortx_proportion_file <- file.path(projectDir, "cibersortFullSigMatrix/CIBERSORTx_Adjusted.txt")
+cibersortx_sigMatrix_file <- file.path(projectDir, "cibersortFullSigMatrix/CIBERSORTx_sigmatrix_Adjusted.txt")
 cibersortx_reduced_proportion_file <- file.path(projectDir, "cibersortx_reduced_sigMatrix/outdir/CIBERSORTx_Adjusted.txt")
 cibersortx_reduced_sigMatrix_file <- file.path(projectDir, "cibersortx_reduced_sigMatrix/outdir/CIBERSORTx_sigmatrix_Adjusted.txt")
 
@@ -132,20 +132,19 @@ dim(cibersortx_reduced_sigMatrix)
 
 ```{r}
 
-# Cibersort gene signature
-# png(file=file.path(outdir, "heatmap_cibersortx_signature_matrix.png"),
-#     width=12,
-#     height=8,
-#     units = "in",
-#     res = 150)
+# Cibersort gene signature before collapse of cell-types
+pdf(file=file.path(outdir, "heatmap_cibersortx_signature_matrix.pdf"),
+    width=12,
+    height=8)
 cibersortx_sigMatrix %>%
   `rownames<-`(NULL) %>%
   as.data.frame() %>%
   tibble::column_to_rownames("GeneSymbol") %>%
   pheatmap(scale = "row",
            treeheight_row = 0,
+           show_rownames = FALSE,
            main = "Cibersortx Adjusted Signature Matrix (scaled by row)")
-# dev.off()
+dev.off()
 ```
 
 ### Original matrix with the reduced signature matrix
@@ -164,6 +163,7 @@ cibersortx_reduced_sigMatrix %>%
   tibble::column_to_rownames("GeneSymbol") %>%
   pheatmap(scale = "row",
            treeheight_row = 0,
+           show_rownames = FALSE,
            main = "Cibersortx Reduced Adjusted Signature Matrix (scaled by row)")
 # dev.off()
 ```
