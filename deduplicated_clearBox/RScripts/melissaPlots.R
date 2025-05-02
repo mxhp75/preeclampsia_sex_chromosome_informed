@@ -10,8 +10,8 @@ library(readr) # for reading and writing data
 
 # set project directory
 
-# projectDir <- "/home/smit1924/preeclampsia_sex_chromosome_informed"
-projectDir <- "D:/VM_Projects/preeclampsia_sex_chromosome_informed"
+projectDir <- "/home/smit1924/preeclampsia_sex_chromosome_informed"
+# projectDir <- "D:/VM_Projects/preeclampsia_sex_chromosome_informed"
 
 # set the output directory
 outdir <- file.path(projectDir, "deduplicated_clearBox/output/58_sample_noCovariate")
@@ -25,7 +25,7 @@ allTable_female_PE_file <- file.path(outdir, "allTable_female.csv")
 # Create list of genes to label
 # labels for volcano plots
 genes_to_label <- c("CP", "CDH13", "IGFBP7", "COL6A3", "VCAN", 
-                    "CSHL1", "ALPP", "NR3C2", "ELOVL6", "ITGA1", "ROBO1")
+                    "CSHL1", "ALPP", "NR3C2", "ELOVL6", "ITGA1", "ROBO1", "HSD17B12", "ZFY")
 
 
 upReg_genes <- c("CP", "GDF7",  "CDH13",  "GPC6",  "PTPN13",  "IGFBP7", "OAF", "PCOLCE",  "COL6A3",  "ANK2",  "DNAJB5",  "TRIL",
@@ -185,23 +185,33 @@ color_scale <- scale_color_manual(
 )
 
 # Create the male plot
-p1 <- 
-ggplot(allTable_male_PE, aes(x = logFC, y = -log10(P.Value))) +
+p1 <- ggplot(allTable_male_PE, aes(x = logFC, y = -log10(P.Value))) +
   geom_point(aes(color = make_de_factor(allTable_male_PE))) +
+  # geom_hline(yintercept = 3.312, linetype = "dashed", color = "grey") +
   geom_text_repel(
     data = subset(allTable_male_PE, hgnc_symbol %in% genes_to_label),
-    aes(label = hgnc_symbol),
+    aes(
+      x = logFC,
+      y = -log10(P.Value),
+      label = hgnc_symbol
+      ),
+    nudge_x = ifelse(
+      subset(allTable_male_PE, hgnc_symbol %in% genes_to_label)$logFC < 0,-1, 1
+      ),
     max.overlaps = Inf,
-    box.padding = 1.5,         # Increased from 0.5
-    point.padding = 0.5,       # Added parameter
-    segment.size = 0.5,        # Controls the thickness of connector lines
-    min.segment.length = 0,    # Ensures all labels have connectors
-    force = 10,                # Increased from 2
-    force_pull = 0.1,          # Reduces the attraction to the point
-    seed = 42                  # For reproducibility
-  ) +
+    box.padding = 1.5,
+    point.padding = 0.5,
+    segment.size = 0.5,
+    min.segment.length = 0,
+    force = 10,
+    force_pull = 0.1,
+    seed = 42
+    ) +
   color_scale +
-  scale_x_continuous(limits = c(-max_fc, max_fc), breaks = seq(-max_fc, max_fc, length.out = 9)) +
+  scale_x_continuous(limits = c(-max_fc, max_fc),
+                     breaks = seq(-max_fc, max_fc, length.out = 9),
+                     # 2 decimal places
+                     labels = scales::number_format(accuracy = 0.01)) +
   scale_y_continuous(limits = c(0, max_y)) +
   labs(x = expression(log[2]~"Fold Change"),
        y = expression(-log[10]~"P-value"),
@@ -212,8 +222,12 @@ ggplot(allTable_male_PE, aes(x = logFC, y = -log10(P.Value))) +
 # Create the female plot
 p2 <- ggplot(allTable_female_PE, aes(x = logFC, y = -log10(P.Value))) +
   geom_point(aes(color = make_de_factor(allTable_female_PE))) +
+  # geom_hline(yintercept = 3.312, linetype = "dashed", color = "grey") +
   color_scale +
-  scale_x_continuous(limits = c(-max_fc, max_fc), breaks = seq(-max_fc, max_fc, length.out = 9)) +
+  scale_x_continuous(limits = c(-max_fc, max_fc),
+                     breaks = seq(-max_fc, max_fc, length.out = 9),
+                     # 2 decimal places
+                     labels = scales::number_format(accuracy = 0.01)) +
   scale_y_continuous(limits = c(0, max_y)) +
   labs(x = expression(log[2]~"Fold Change"),
        y = expression(-log[10]~"P-value"),
@@ -231,13 +245,13 @@ combinedVolcano_plot <- (p1 + p2) +
 print(combinedVolcano_plot)
 
 
-# ggsave(filename = file.path(outdir, paste0("finalManuscriptPlots/", "combinedVolcano.pdf")),
-#        create.dir = TRUE,
-#        plot = combinedVolcano_plot,
-#        units = "in",
-#        width = 10,
-#        height = 10,
-#        dpi = 300)
+ggsave(filename = file.path(outdir, paste0("finalManuscriptPlots/", "combinedVolcano.jpeg")),
+       create.dir = TRUE,
+       plot = combinedVolcano_plot,
+       units = "in",
+       width = 10,
+       height = 10,
+       dpi = 300)
 
 # create the figure for the combined volcano plots and the log2FC scatter plot
 # Define the layout using area()
