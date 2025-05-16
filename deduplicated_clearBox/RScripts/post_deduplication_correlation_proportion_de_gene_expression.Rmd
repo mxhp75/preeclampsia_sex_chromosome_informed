@@ -33,6 +33,7 @@ library(writexl)
 library(magrittr)
 library(tibble)
 library(ggplot2)
+library(ggnewscale)
 library(ggbeeswarm)
 library(ggrepel)
 library(ggExtra)
@@ -44,8 +45,8 @@ library(grid)
 
 ```{r}
 # set project directory
-# projectDir <- "/home/smit1924/preeclampsia_sex_chromosome_informed"
-projectDir <- "D:/VM_Projects/preeclampsia_sex_chromosome_informed"
+projectDir <- "/home/smit1924/preeclampsia_sex_chromosome_informed"
+# projectDir <- "D:/VM_Projects/preeclampsia_sex_chromosome_informed" # windows style files
 
 # file paths for files to be imported
 
@@ -605,25 +606,72 @@ stacked_barchart_data <- dplyr::right_join(cibersortx_post_dedup_proportions, dp
 #     height=8,
 #     units = "in",
 #     res = 150)
-ggplot(data = stacked_barchart_data,
-       aes(x = samplename,
-           y = value,
-           fill = variable,
-           label = sex_outcome)) +
-  geom_bar(stat = "identity") +
-  scale_fill_manual(values = custom_colors) +
-  labs(title = "Stacked Bar Chart of Post Deduplication Cell Type Proportions",
-       x = "Samplename",
-       y = "Cell Type Proportion",
-       fill = "Cell Type") +
-  theme_minimal() +
-    theme(axis.text.x = element_text(angle = 90, vjust = 0.4)) +
-    geom_text(aes(x = samplename,
-                  y = 0.01,
-                  label = sex_outcome),
-            angle = 90,
-            size = 3)
+# ggplot(data = stacked_barchart_data,
+#        aes(x = samplename,
+#            y = value,
+#            fill = variable,
+#            label = sex_outcome)) +
+#   geom_bar(stat = "identity") +
+#   scale_fill_manual(values = custom_colors) +
+#   labs(title = "Stacked Bar Chart of Post Deduplication Cell Type Proportions",
+#        x = "Samplename",
+#        y = "Cell Type Proportion",
+#        fill = "Cell Type") +
+#   theme_minimal() +
+#     theme(axis.text.x = element_text(angle = 90, vjust = 0.4))
 # dev.off()
+
+# Sample-level annotation
+annotation_df <- stacked_barchart_data %>%
+  select(samplename, sex_outcome) %>%
+  distinct()
+
+png(file=file.path(outdir, "post_dedup_stacked_proportions.png"),
+    width=14,
+    height=8,
+    units = "in",
+    res = 150)
+ggplot() +
+  # First layer: annotation bar using sex_outcome
+  geom_tile(data = annotation_df,
+            aes(x = samplename, y = 1.05, fill = sex_outcome),
+            height = 0.05, width = 0.9) +
+
+  # First fill scale: for annotation
+  scale_fill_manual(
+    name = "Sex Outcome",
+    values = c(
+      "F_Control" = "palegreen3",
+      "F_PE" = "#004000",
+      "M_Control" = "plum3",
+      "M_PE" = "#2A0052"
+    )
+  ) +
+
+  # Tell ggplot we're done with the first fill scale
+  ggnewscale::new_scale_fill() +
+
+  # Second layer: stacked bar chart
+  geom_bar(data = stacked_barchart_data,
+           aes(x = samplename, y = value, fill = variable),
+           stat = "identity") +
+
+  # Second fill scale: for cell types
+  scale_fill_manual(values = custom_colors, name = "Cell Type") +
+
+  # Labels and theming
+  labs(
+    title = "Stacked Bar Chart of Post Deduplication Cell Type Proportions",
+    x = "Samplename",
+    y = "Cell Type Proportion"
+  ) +
+  theme_minimal() +
+  theme(
+    axis.text.x = element_text(angle = 90, vjust = 0.4),
+    legend.position = "right"
+  )
+dev.off()
+
 ```
 
 # PCA and correlate 
