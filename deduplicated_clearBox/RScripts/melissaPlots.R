@@ -340,11 +340,14 @@ plot_data <- plot_data %>%
   dplyr::mutate(new_sex_outcome = dplyr::case_when(
     sex_outcome == "M_PE" ~ "M_PE",
     sex_outcome == "F_PE" ~ "F_PE",
-    sex_outcome == "M_Control" ~ "M_Un",
-    sex_outcome == "F_Control" ~ "F_Un",
+    # sex_outcome == "M_Control" ~ "M_Un",
+    # sex_outcome == "F_Control" ~ "F_Un",
+    sex_outcome == "M_Control" ~ "M_Con",
+    sex_outcome == "F_Control" ~ "F_Con",
     TRUE ~ NA_character_  # This handles any unexpected values
   )) %>%
-  dplyr::mutate(., new_sex_outcome = factor(new_sex_outcome, levels = c("F_Un", "F_PE", "M_Un", "M_PE")))
+  # dplyr::mutate(., new_sex_outcome = factor(new_sex_outcome, levels = c("F_Un", "F_PE", "M_Un", "M_PE")))
+  dplyr::mutate(., new_sex_outcome = factor(new_sex_outcome, levels = c("F_Con", "F_PE", "M_Con", "M_PE")))
 
 # create the new plot
 p6 <- ggplot(subset(plot_data, hgnc_symbol %in% c(upReg_genes, downReg_genes)), # subset the long gene expression to only include DE GOI
@@ -356,7 +359,7 @@ p6 <- ggplot(subset(plot_data, hgnc_symbol %in% c(upReg_genes, downReg_genes)), 
   # coord_flip() +
   theme_bw() +  # Clean theme
   scale_fill_manual(values = c("palegreen3", "#004000",  "plum3", "#2A0052")) +
-  labs(title = paste("Expression of DE genes by Sex & Outcome"),
+  labs(title = paste("Expression of DE genes by Fetal Sex & Outcome"),
        x = "Sex & Outcome",
        y = expression(log[2]~"CPM Expression")) +
   facet_wrap(~hgnc_symbol, ncol = 7, scales = "free") +
