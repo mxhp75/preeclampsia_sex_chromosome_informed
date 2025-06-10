@@ -11,6 +11,7 @@ knitr::opts_chunk$set(echo = TRUE)
 
 # Load Libraries
 This script is based on the tutorial found here https://github.com/Lindseynicer/WGCNA_tutorial/blob/main/WGCNA_tutorial_Rscript
+
 ```{r}
 library(WGCNA)
 library(tidyverse)
@@ -46,6 +47,8 @@ input_deduplicated_cibersortx_adjusted_file <- file.path(projectDir, "deduplicat
 ## Blood pressure measurements
 input_SCOPE_bloodPressure_file <- file.path(projectDir, "deduplicated_clearBox/rawData/SCOPE_bloodPressure.csv")
 input_STOP_bloodPressure_file <- file.path(projectDir, "deduplicated_clearBox/rawData/STOP_bloodPressure.csv")
+
+max_sbp_SCOPE_STOP_file <- file.path(projectDir, "metaData_SCOPE_STOP_output/SCOPE_STOP_max_sbp_dbp.csv")
 
 gene_info_file <- file.path(projectDir, "clearBoxCleanData/gencode_v29_gene_id_symbol_chr_biotype.csv")
 
@@ -131,8 +134,9 @@ STOP_bloodPressure <- read_csv(input_STOP_bloodPressure_file) %>%
 combined_bloodPressure <- rbind(dplyr::select(SCOPE_bloodPressure, samplename, map = f11c_1st_vst_map_2nd),
                                 dplyr::select(STOP_bloodPressure, samplename, map))
 
-```
+max_sbp_SCOPE_STOP <- read_csv(max_sbp_SCOPE_STOP_file)
 
+```
 
 ## Raw Counts
 ```{r}
@@ -347,7 +351,7 @@ lcpm <- edgeR::cpm(male_dgeList, log = TRUE)
 # 2. Transpose the data for WGCNA (genes should be in columns, samples in rows)
 datExpr <- t(lcpm)
 ## Save a copy of the datExpr object for gene ontology analysis
-write_rds(datExpr, output_wgcna_datExpr_file)
+# write_rds(datExpr, output_wgcna_datExpr_file)
 
 # 3. Check for good genes and samples (optional but recommended)
 gsg <- goodSamplesGenes(datExpr, verbose = 3)
@@ -534,14 +538,56 @@ merge <- mergeCloseModules(datExpr,
                            cutHeight = MEDissThreshold,
                            verbose = 3)
 
-mergedColours <- merge$colors
+# recode the default module colours with something a bit more dynamic for figures
+# Define the colour mapping
+colour_map <- c(
+  "salmon" = "#191A1A",   # black
+  "cyan" = "#FCAE3F",     # orange
+  "black" = "#0B5A9C",    # darkblue
+  "brown" = "#25AAE2",    # lightblue
+  "grey60" = "#BE3597",   # pink
+  "tan" = "#12A89D",      # green
+  "grey" = "grey",        # grey
+  "red" = "#DB4149",      # red
+  "purple" = "#652D90"    # purple
+)
+
+# Extract current column names
+old_names <- colnames(merge$newMEs)
+
+# Remove the "ME" prefix to isolate the module colours
+module_colours <- substring(old_names, 3)
+
+# Replace colours using the map
+new_colours <- ifelse(module_colours %in% names(colour_map),
+                      colour_map[module_colours],
+                      module_colours)  # leave as-is if no match
+
+# Reapply "ME" prefix
+new_names <- paste0("ME", new_colours)
+
+# Assign new names back to the data frame
+colnames(merge$newMEs) <- new_names
+
+# recode the colours in merge$colors
+merge$colors <- recode(merge$colors,
+  "salmon" = "#191A1A",   # black
+  "cyan" = "#FCAE3F",     # orange
+  "black" = "#0B5A9C",    # darkblue
+  "brown" = "#25AAE2",    # lightblue
+  "grey60" = "#BE3597",   # pink
+  "tan" = "#12A89D",      # green
+  "grey" = "grey",        # grey
+  "red" = "#DB4149",      # red
+  "purple" = "#652D90"    # purple
+                        )
 
 # save the merged colours for gene ontology analysis
-write_rds(mergedColours,
-          output_wgcna_merged_modules_colours_file)
+# write_rds(mergedColours,
+#           output_wgcna_merged_modules_colours_file)
 
-# how many modules do we have?
-length(table(mergedColours))
+# # how many modules do we have?
+# length(table(mergedColours))
 
 # Create a data frame showing which merged module each gene is assigned to
 merged_gene_module_table <- data.frame(
@@ -563,7 +609,7 @@ mergedMEs <- merge$newMEs
 #     height = 6,
 #     units = "in",
 #     res = 150)
-plotDendroAndColors(geneTree, cbind(dynamicColours, mergedColours), 
+plotDendroAndColors(geneTree, cbind(dynamicColours, merge$colors), 
                     c("Dynamic Tree Cut", "Merged Dynamic"),
                     dendroLabels = FALSE, 
                     hang = 0.03,
@@ -578,36 +624,51 @@ plotDendroAndColors(geneTree, cbind(dynamicColours, mergedColours),
 # Export network data for cytoscape
 
 ```{r}
-# Export the gene list of old modules 
-# for (i in 1:length(merge$oldMEs)){
-#   modules = c(substring(names(merge$oldMEs)[i], 3));
-#   genes = colnames(datExpr)
-#   inModule = is.finite(match(dynamicColours,modules))
-#   modGenes = genes[inModule]
-#   modTOM=TOM[inModule,inModule]
-#   dimnames(modTOM)=list(modGenes,modGenes)
-#   cyt = exportNetworkToCytoscape(modTOM,
-#                                  edgeFile = paste(outdir, "/orign_CytoscapeInput-edges-", paste(modules, collapse="-"), ".txt", sep=""),
-#                                  nodeFile = paste(outdir, "/orign_CytoscapeInput-nodes-", paste(modules, collapse="-"), ".txt", sep=""),
-#                                  weighted = TRUE, threshold = -1, nodeNames = modGenes, nodeAttr = dynamicColours[inModule]);
-# }
-# 
-# Export the gene list of new modules
-for (i in 1:length(merge$newMEs)){
-  modules = c(substring(names(merge$newMEs)[i], 3));
-  genes = colnames(datExpr)
-  # inModule = is.finite(match(dynamicColours,modules))
-  inModule = is.finite(match(merge$colors,modules))
-  modGenes = genes[inModule]
-  modTOM=TOM[inModule,inModule]
-  dimnames(modTOM)=list(modGenes,modGenes)
-  cyt = exportNetworkToCytoscape(modTOM,
-                                 edgeFile = paste(outdir, "/merge_CytoscapeInput-edges-", paste(modules, collapse="-"), ".txt", sep=""),
-                                 nodeFile = paste(outdir, "/merge_CytoscapeInput-nodes-", paste(modules, collapse="-"), ".txt", sep=""),
-                                 weighted = TRUE,
-                                 threshold = -1,
-                                 nodeNames = modGenes,
-                                 nodeAttr = merge$colors[inModule]);
+
+reverse_colour_map <- c(
+  "#191A1A" = "black",
+  "#FCAE3F" = "orange",
+  "#0B5A9C" = "darkblue",
+  "#25AAE2" = "lightblue",
+  "#BE3597" = "pink",
+  "#12A89D" = "green",
+  "grey"    = "grey",
+  "#DB4149" = "red",
+  "#652D90" = "purple"
+)
+
+
+# Export the gene list of new modules 
+for (i in 1:length(merge$newMEs)) {
+  module_hex <- substring(names(merge$newMEs)[i], 3)
+  genes <- colnames(datExpr)
+  inModule <- merge$colors == module_hex
+  modGenes <- genes[inModule]
+  
+  if (length(modGenes) == 0) next
+  
+  modTOM <- TOM[inModule, inModule]
+  dimnames(modTOM) <- list(modGenes, modGenes)
+  
+  # Build readable nodeAttr
+  nodeAttr <- merge$colors[inModule]
+  names(nodeAttr) <- modGenes
+  nodeAttr <- sapply(nodeAttr, function(x) {
+    if (x %in% names(reverse_colour_map)) reverse_colour_map[[x]] else x
+  })
+  
+  # Safe file name (ie without the "#")
+  safeModuleName <- gsub("#", "hex_", module_hex)
+  
+  # Export
+  cyt <- exportNetworkToCytoscape(modTOM,
+                                  edgeFile = file.path(outdir, paste0("merge_CytoscapeInput-edges-", safeModuleName, ".txt")),
+                                  nodeFile = file.path(outdir, paste0("merge_CytoscapeInput-nodes-", safeModuleName, ".txt")),
+                                  weighted = TRUE,
+                                  threshold = -1,
+                                  nodeNames = modGenes,
+                                  nodeAttr = nodeAttr
+  )
 }
 
 
@@ -628,8 +689,8 @@ all_edges <- edge_files %>%
                 Weight = weight)
 
 # Save edge file
-write.csv(all_edges, 
-          file = paste0(outdir, "/combined_edges.csv"), 
+write.csv(all_edges,
+          file = paste0(outdir, "/combined_edges.csv"),
           row.names = FALSE)
 
 # Read and combine node files
@@ -645,14 +706,13 @@ duplicates <- all_edges %>%
   filter(n() > 1)
 
 # Save node file
-write.csv(all_nodes, 
-          file = paste0(outdir, "/combined_nodes.csv"), 
+write.csv(all_nodes,
+          file = paste0(outdir, "/combined_nodes.csv"),
           row.names = FALSE)
 
 # Optional: check dimensions of combined objects
 dim(all_edges)
 dim(all_nodes)
-
 
 ```
 
@@ -679,7 +739,27 @@ pheatmap(ME_cor,
 ```
 
 ## Merged modules
+
 ```{r}
+# use the reverse colour map object to rename the columns
+# Get current column names
+old_names <- colnames(mergedMEs)
+
+# Extract the hex code from each "ME#..." column name
+module_hexes <- substring(old_names, 3)
+
+# Use the map to look up readable names
+new_labels <- ifelse(module_hexes %in% names(reverse_colour_map),
+                     reverse_colour_map[module_hexes],
+                     module_hexes)
+
+# Reattach "ME" prefix
+new_names <- paste0("ME_", new_labels)
+
+# Rename the columns
+colnames(mergedMEs) <- new_names
+
+# calculate the correlation
 ME_merged_cor <- cor(mergedMEs)
 
 # png(file = output_correlation_heatmap_mergedModules_file,
@@ -698,7 +778,6 @@ pheatmap(ME_merged_cor,
 # dev.off()
 
 ```
-
 
 # Correlate module eigen-genes and samples (or other discrete data)
 
@@ -792,9 +871,29 @@ pheatmap(eigenGene_expr,
 # dev.off()
 ```
 
+# Create the traits object
+
+```{r}
+# create the traitsAll object
+# start by joining the cell type proportiond and the metadata of interest
+traitsAll <- dplyr::left_join(col_ann_cell_type %>% tibble::rownames_to_column("samplename"), dplyr::select(metadata, samplename, GestationalAge, BMI, maternalAge, sex_outcome), by = "samplename") %>%
+  # next add the mean arterial pressure (map) measurement
+  dplyr::left_join(., combined_bloodPressure, by = "samplename") %>%
+  # and finally add the max sbp measurement
+  dplyr::left_join(., max_sbp_SCOPE_STOP, by = "samplename") %>%
+  tibble::column_to_rownames("samplename") %>%
+  dplyr::select(., map, max_sbp, max_dbp, GestationalAge, BMI, maternalAge, sex_outcome, everything())
+# # set the new factor levels
+sex_outcome_levels <- c("F_Control", "M_Control", "F_PE", "M_PE")
+traitsAll$sex_outcome <- factor(traitsAll$sex_outcome, levels=sex_outcome_levels)
+traitsAll$sex_outcome <- as.numeric(traitsAll$sex_outcome)
+
+
+```
 
 
 # Correlate modules with traits
+
 ```{r}
 # Function to create module-trait correlation heatmap
 create_module_trait_correlation <- function(module_type = "unmerged",
@@ -823,8 +922,7 @@ create_module_trait_correlation <- function(module_type = "unmerged",
   textMatrix <- ifelse(moduleTraitPvalue < p_threshold,
                        paste(signif(moduleTraitCor, 2), "\n(",
                              signif(moduleTraitPvalue, 1), ")",
-                             sep = ""),
-                       "")
+                             sep = ""), "")
   
   # Set default title if none provided
   if (is.null(main_title)) {
@@ -860,31 +958,44 @@ cell_type_cors <- create_module_trait_correlation(
   trait_data = col_ann_cell_type
 )
 
+# # lets prepare the mergedMEs with colour module names withut "ME_" (and drop the grey module)
 
-# Example usage for all traits:
+# # Get the current column names
+old_names <- colnames(mergedMEs)
+
+new_names <- substring(old_names, 4)
+
+# make a new version of the mergedMEs
+mergedMEs_colour <- mergedMEs
+
+# Apply new names
+colnames(mergedMEs_colour) <- new_names
+
+# Example usage for all traits including saving the headmap:
 
 # Save the heatmap as a PNG file
-# png(file = output_module_trait_cor_heatmap_file,
-#     width = 12,
-#     height = 10,
-#     units = "in",
-#     res = 150)
+png(file = output_module_trait_cor_heatmap_file,
+    width = 12,
+    height = 10,
+    units = "in",
+    res = 150)
 
 all_trait_cors <- create_module_trait_correlation(
   module_type = "merged",  # or "unmerged"
   MEs = MEs,
-  mergedMEs = mergedMEs,
-  trait_data = traitsAll,
-  main_title = "Module-Trait Relationships Including Metadata"
-)
+  mergedMEs = dplyr::select(mergedMEs_colour, -grey),
+  trait_data = dplyr::select(traitsAll, -map, -max_sbp, -max_dbp),
+  main_title = "Module-Trait Relationships (Male)"
+  )
 
-# dev.off()
+dev.off()
 ```
 
 # Intramodular connectivity: identifying genes with high geneModuleMembership & geneTraitSignficance
 ## Un-Merged
 
 ```{r}
+
 # set the trait/cell-type of interest
 name_traitOfInterest <- "Cytotrophoblast"
 # set the module of interest
@@ -906,6 +1017,7 @@ MET <- orderMEs(cbind(MEs, traitOfInterest))
 # Calculate Gene Module Membership (correlation between gene expression and module eigengenes)
 geneModuleMembership <- as.data.frame(cor(datExpr, MEs, use = "p"))
 # Calculate p-values for the Gene Module Membership correlations
+nSamples <- 58
 MMPvalue <- as.data.frame(corPvalueStudent(as.matrix(geneModuleMembership), nSamples))
 
 # Rename columns in geneModuleMembership and MMPvalue for clarity (MM = Module Membership, p.MM = p-value Module Membership)
@@ -962,8 +1074,9 @@ verboseScatterplot(abs(geneModuleMembership[moduleGenes, column]),
 ## Merged
 
 ```{r}
+nSamples <- 21
 # select the required module
-module <- "brown"
+module <- "orange"
 # select the required trait
 name_traitOfInterest <- "CD14..Monocytes"
 # pull the trait value (eg the cell-type proportion or the BMI of the sample)
@@ -974,7 +1087,7 @@ traitOfInterest <- traitsAll %>%
 names(traitOfInterest) <- name_traitOfInterest
 
 # Extract module names from the Module Eigengenes (MEs) object
-modNames <- substring(names(mergedMEs), 3)
+modNames <- substring(names(mergedMEs), 4)
 
 # Combine Module Eigengenes (MEs) with traitOfInterest data
 # note the orderMEs function orders the combined data for better visualization
@@ -1014,9 +1127,14 @@ plotEigengeneNetworks(MET,
                       xLabelsAngle = 90)
 
 # Rename to moduleColors if merged
-moduleColors <- mergedColours
+moduleColors <- merge$colors
+#  Use the map to look up readable names
+new_moduleColors <- ifelse(moduleColors %in% names(reverse_colour_map),
+                     reverse_colour_map[moduleColors],
+                     moduleColors)
+
 column <- match(module, modNames)
-moduleGenes <- moduleColors==module
+moduleGenes <- new_moduleColors==module
 sizeGrWindow(7, 7);
 par(mfrow = c(1,1));
 verboseScatterplot(abs(geneModuleMembership[moduleGenes, column]),
@@ -1036,12 +1154,12 @@ verboseScatterplot(abs(geneModuleMembership[moduleGenes, column]),
 ```{r}
 # calculate kIM
 kIM <- intramodularConnectivity(adjMat = adjacency,
-                                colors = mergedColours)
+                                colors = new_moduleColors)
 
 # Create a data frame combining the kIM results and module colors
 kIM_with_modules <- data.frame(
   Gene = rownames(kIM),      # Add gene names as a column
-  Module = mergedColours,     # Add module assignments
+  Module = new_moduleColors,     # Add module assignments
   kIM                        # Add the connectivity metrics
 )
 
@@ -1058,14 +1176,14 @@ get_hub_genes <- function(kIM_data, module_color, n = 10) {
 }
 
 # use the function to create objects for each module
-brown_genes <- get_hub_genes(kIM_with_modules, "brown")
-cyan_genes <- get_hub_genes(kIM_with_modules, "cyan")
+lightblue_genes <- get_hub_genes(kIM_with_modules, "lightblue")
+orange_genes <- get_hub_genes(kIM_with_modules, "orange")
+darkblue_genes <- get_hub_genes(kIM_with_modules, "darkblue")
 black_genes <- get_hub_genes(kIM_with_modules, "black")
-salmon_genes <- get_hub_genes(kIM_with_modules, "salmon")
-grey60_genes <- get_hub_genes(kIM_with_modules, "grey60")
+pink_genes <- get_hub_genes(kIM_with_modules, "pink")
 red_genes <- get_hub_genes(kIM_with_modules, "red")
 purple_genes <- get_hub_genes(kIM_with_modules, "purple")
-tan_genes <- get_hub_genes(kIM_with_modules, "tan")
+green_genes <- get_hub_genes(kIM_with_modules, "green")
 grey_genes <- get_hub_genes(kIM_with_modules, "grey")
 ```
 
@@ -1202,7 +1320,7 @@ plot_wgcna_modules(datExpr_ordered, gene_module_table)
 
 ```
 
-## merged modules
+## merged modules - line plots
 ```{r}
 
 # First, let's order filtered_metaData by sex_outcome in ascending order
@@ -1220,7 +1338,6 @@ all(rownames(datExpr_ordered) == ordered_metadata$samplename)  # This should ret
 
 # ensure datExpr is a matrix (in case it was converted to a data frame)
 datExpr_ordered <- as.matrix(datExpr_ordered)
-
 
 plot_wgcna_modules <- function(expression_matrix, gene_module_table, output_dir = "module_plots") {
   # Create output directory if it doesn't exist
@@ -1249,13 +1366,34 @@ plot_wgcna_modules <- function(expression_matrix, gene_module_table, output_dir 
   # Create a plot for each module
   for (module in modules) {
     # Filter the data for the current module
-    module_data <- expr_long %>% filter(Module == module)
+    # module_data <- expr_long %>% filter(Module == module)
+    module_data <- expr_long %>%
+      dplyr::left_join(., ordered_metadata %>% dplyr::select(., samplename, sex_outcome), by = c("Sample" = "samplename")) %>%
+      # Filter the data for the current module 
+      filter(Module == module)
     
-    # Generate the plot
     p <- ggplot(module_data, aes(x = Sample,
                                  y = Expression,
                                  group = Gene,
-                                 color = "red")) +  # Use Gene for line coloring
+                                 color = "red")) +
+      # First layer: annotation bar using sex_outcome
+      geom_tile(data = module_data,
+                aes(x = Sample, y = max(module_data$Expression) * 1.05, fill = sex_outcome),
+                height = max(module_data$Expression) * 0.05, width = 0.9,
+                colour = NA) +
+      # First fill scale: for annotation
+      scale_fill_manual(
+        name = "Sex Outcome",
+        values = c(
+          "F_Control" = "palegreen3",
+          "F_PE" = "#004000",
+          "M_Control" = "plum3",
+          "M_PE" = "#2A0052"
+        )
+      ) +
+      # Tell ggplot we're done with the first fill scale
+      ggnewscale::new_scale_fill() +
+      # Add your original geom_line layer
       geom_line(alpha = 0.5) +
       theme_minimal() +
       theme(axis.text.x = element_text(angle = 90, hjust = 1, vjust = 0.5),
@@ -1265,8 +1403,22 @@ plot_wgcna_modules <- function(expression_matrix, gene_module_table, output_dir 
            y = "Log2 CPM") +
       scale_x_discrete(limits = levels(sample_order))
     
+    # # Generate the plot
+    # p <- ggplot(module_data, aes(x = Sample,
+    #                              y = Expression,
+    #                              group = Gene,
+    #                              color = "red")) +  # Use Gene for line coloring
+    #   geom_line(alpha = 0.5) +
+    #   theme_minimal() +
+    #   theme(axis.text.x = element_text(angle = 90, hjust = 1, vjust = 0.5),
+    #         legend.position = "none") +  # Remove legend
+    #   labs(title = paste("Gene Expression in Module", module),
+    #        x = "Samplename",
+    #        y = "Log2 CPM") +
+    #   scale_x_discrete(limits = levels(sample_order))
+    
     # Save the plot to the output directory
-    ggsave(filename = file.path(outdir, paste0("mergedModule_", module, "_linePlot.png")),
+    ggsave(filename = file.path(outdir, paste0("mergedModule_", module, "_linePlot_anno.png")),
            plot = p,
            width = 10,
            height = 6)
@@ -1274,6 +1426,13 @@ plot_wgcna_modules <- function(expression_matrix, gene_module_table, output_dir 
   
   cat("Plots have been saved in the", outdir, "directory.\n")
 }
+
+# recode the module colour names
+merged_gene_module_table$Module <- sapply(
+  merged_gene_module_table$Module,
+  function(x) if (x %in% names(reverse_colour_map)) reverse_colour_map[[x]] else x
+)
+
 
 # Usage example:
 plot_wgcna_modules(datExpr_ordered, merged_gene_module_table)
