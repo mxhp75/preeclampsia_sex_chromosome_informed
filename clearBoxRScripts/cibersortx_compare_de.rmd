@@ -24,8 +24,8 @@ library(ggrepel)
 library(pheatmap)
 
 # set project directory
-# projectDir <- "/home/smit1924/preeclampsia_sex_chromosome_informed"
-projectDir <- "D:/VM_Projects/preeclampsia_sex_chromosome_informed"
+projectDir <- "/home/smit1924/preeclampsia_sex_chromosome_informed"
+# projectDir <- "D:/VM_Projects/preeclampsia_sex_chromosome_informed"
 
 expt_name <- 'cibersortx_de'
 
@@ -132,10 +132,11 @@ dim(cibersortx_reduced_sigMatrix)
 
 ```{r}
 
-# Cibersort gene signature before collapse of cell-types
-pdf(file=file.path(outdir, "heatmap_cibersortx_signature_matrix.pdf"),
-    width=12,
-    height=8)
+# Save pheatmap as a vector PDF suitable for journal submission
+pdf(file = file.path(outdir, "heatmap_cibersortx_signature_matrix.pdf"),
+    width = 170 / 25.4,    # convert mm to inches for width (6.69 inches)
+    height = 110 / 25.4)   # adjust height as needed (here: ~4.33 inches)
+
 cibersortx_sigMatrix %>%
   `rownames<-`(NULL) %>%
   as.data.frame() %>%
@@ -143,7 +144,9 @@ cibersortx_sigMatrix %>%
   pheatmap(scale = "row",
            treeheight_row = 0,
            show_rownames = FALSE,
-           main = "Cibersortx Adjusted Signature Matrix (scaled by row)")
+           fontsize = 8,              # adjust font size for legibility
+           main = "CIBERSORTx Adjusted Signature Matrix (scaled by row)")
+
 dev.off()
 ```
 
