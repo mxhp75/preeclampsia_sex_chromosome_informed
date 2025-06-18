@@ -1,0 +1,471 @@
+---
+title: "wgcna_publication"
+author: "Melanie Smith"
+date: "17 June 2025"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(message=FALSE,
+                      echo=TRUE,
+                      warning=FALSE)
+```
+
+# Load Libraries
+This script is based on the tutorial found here https://github.com/Lindseynicer/WGCNA_tutorial/blob/main/WGCNA_tutorial_Rscript
+
+```{r}
+library(WGCNA)
+library(tidyverse)
+library(GEOquery)
+library(CorLevelPlot) #devtools::install_github("kevinblighe/CorLevelPlot")
+library(gridExtra)
+library(edgeR)
+library(ggplot2)
+library(pheatmap)
+library(dplyr)
+
+allowWGCNAThreads() # allows multithreading up to 14 threads
+
+```
+
+# Set directories and paths
+
+```{r}
+# set project directory
+projectDir <- "/home/smit1924/preeclampsia_sex_chromosome_informed"
+# projectDir <- "/Users/pillmaka/Desktop/Melanie/drive-download"
+
+# input files
+# metadata, all samples
+metadata_file <- file.path(projectDir, "clearBoxRawData/cleanSampleMetadata.csv")
+# Gene information
+gene_info_file <- file.path(projectDir, "clearBoxCleanData/gencode_v29_gene_id_symbol_chr_biotype.csv")
+# output from edgeR::topTable(), male comparison, all genes
+input_allTable_male <- file.path(projectDir, "deduplicated_clearBox/output/58_sample_noCovariate/allTable_male.csv")
+# raw counts, all samples
+counts <- file.path(projectDir, "deduplicated_clearBox/readCounts/deduplicated_s2_readCounts.txt")
+
+# set the output directory
+outdir <- file.path(projectDir, "deduplicated_clearBox/output/wgcna_2") # make a new directory for the publication ready plots etc
+# Create the directory if it doesn't exist
+if (!dir.exists(outdir)) {
+  dir.create(outdir, recursive = TRUE)
+}
+
+```
+
+# Import all input data tables
+## Sample metadata
+```{r}
+
+## Metadata
+metadata <- read_csv(file = metadata_file)
+# Filter metadata to exclude samples where Sex = "F"
+filtered_metadata <- metadata %>%
+  filter(Sex != "F")
+
+```
+
+## Gene info file
+```{r}
+## Gene ID versus GeneSymbol
+gene_info <- read_csv(file = gene_info_file)
+gene_info <- gene_info[!duplicated(gene_info$ensembl_gene_id), ]
+```
+
+## DE genes
+Here I will filter the DE genes such that only genes with an adjusted p-value <=0.2 remain.  
+This gives me 2077 genes for the wgcna analysis.  
+```{r}
+allTable_male <- read_csv(input_allTable_male) %>%
+  dplyr::filter(., adj.P.Val <= 0.2)
+```
+
+## Raw Counts
+```{r}
+# import the counts table
+# counts are annotated to GRCh38
+rawCounts_deduplicated <- read.delim(file = counts)
+# tidy up the column names
+colnames(rawCounts_deduplicated) <- gsub("X.media.sf_D_DRIVE.VM_Projects.20240619_deduplicateBams.deduplicated_data.|_marked_duplicates.bam|_T.*|_",
+                                 "",
+                                 colnames(rawCounts_deduplicated))
+
+```
+
+# Establish DGElist object
+
+```{r}
+# drop the samples that we previously determined were poor quality and are not required for this analysis
+counts <- rawCounts_deduplicated %>%
+  tibble::column_to_rownames("Geneid")
+# ensure the counts and metadata are in the same order
+counts <- counts[, metadata$samplename]
+
+# drop rows with zero in all columns
+counts <- counts[rowSums(counts[])>0,] %>%
+  tibble::rownames_to_column("ensembl_gene_id")
+
+# add the hgnc gene symbol, chromosome and biotype to the counts matrix
+counts_hgnc <- dplyr::left_join(counts, gene_info, by = "ensembl_gene_id") %>%
+  dplyr::select(., ensembl_gene_id, ensembl, hgnc_symbol, seqnames, gene_type, everything())
+dim(counts_hgnc) # 43423 63
+
+# drop rows with NAs introduced in the join
+counts_hgnc_clean <- counts_hgnc %>%
+  filter(!is.na(ensembl))
+dim(counts_hgnc_clean) # 42645 63
+
+# establish the DGEList
+dge_list_obj <- edgeR::DGEList(counts = counts_hgnc_clean %>%
+                          tibble::column_to_rownames("ensembl") %>%
+                          dplyr::select(., -hgnc_symbol, -ensembl_gene_id, -seqnames, -gene_type),
+                        samples = metadata,
+                        group = metadata$group,
+                        genes = counts_hgnc_clean %>% dplyr::select(ensembl, hgnc_symbol, seqnames, gene_type))
+
+dim(dge_list_obj) # 42645 58
+```
+
+# Filter biological noise
+- I am keeping the filtering and normalisation steps here, even though I am using the DE genes to subset the final expression table, because I need to the expression values to be the same as the expression values that went into the DE in the first place.  
+
+```{r}
+
+# new df of unfiltered cpm for the reduced DGEList
+preFilterCPM <- edgeR::cpm(dge_list_obj)
+
+# remove low expressed genes (filterCPM in numSamples PE)
+keep.exprs <- rowSums(preFilterCPM > 2) >= 5
+
+# Perform the filtering step and recalculate the TMM normalisation factors for each library.
+dge_list_obj <- dge_list_obj[keep.exprs,,keep.lib.sizes = FALSE]
+
+dim(dge_list_obj)
+
+```
+
+# TMM normalisation
+
+```{r}
+# calculate normalisation factors and apply to the DGEList object
+dge_list_obj <- edgeR::calcNormFactors(dge_list_obj,
+                                method="TMM")
+
+# set the new factor levels
+sex_outcome_levels <- c("F_Control", "M_Control", "F_PE", "M_PE")
+dge_list_obj$samples$sex_outcome <- factor(dge_list_obj$samples$sex_outcome,
+                                           levels=sex_outcome_levels)
+
+```
+
+# Keep only male samples
+Until this point all the filtering and normalisation has included the full dataset (minus the poorly sequenced samples that were removed).  
+At this point we remove the data from female samples and retain only data from the males.  
+We will also put the hgnc symbols into the rownames of the `counts` and `genes` compartments as these names are used later and the hgnc symbols are more human readable than the enseml IDs.  
+
+```{r}
+male_dgeList <- dge_list_obj[dge_list_obj$genes$ensembl %in% allTable_male$ensembl, dge_list_obj$samples$samplename %in% filtered_metadata$samplename]
+
+# replace the ensembl ID in the rownames with the hgnc gene symbol
+# Ensure the 'hgnc_symbol' column exists in 'male_dgeList$genes'
+if ("hgnc_symbol" %in% colnames(male_dgeList$genes)) {
+  # Replace rownames in the 'counts' and 'genes' elements with 'hgnc_symbol'
+  rownames(male_dgeList$counts) <- male_dgeList$genes$hgnc_symbol
+  rownames(male_dgeList$genes) <- male_dgeList$genes$hgnc_symbol
+} else {
+  warning("The 'hgnc_symbol' column does not exist in male_dgeList$genes.")
+}
+
+```
+
+# Network Construction
+
+Prior to identifying which genes are correlated with each other, need to select a soft power threshold
+
+The first step in constructing a scale-free gene co-expression requires choosing a soft-thresholding power. 
+
+Here, we test a range of possible soft-thresholding powers to find the minimum one which results in approximately [scale-free topology](https://en.wikipedia.org/wiki/Scale-free_network) for the male gene expression networks. We define an appropriate minimum scale-free topology fitting index *R<sup>2</sup>* to be at least 0.20 (80% confidence). This step takes a couple of mins to run. 
+
+```{r message=FALSE, warning=FALSE}
+
+# 1. Normalise the counts to CPM (log-transformed)
+lcpm <- edgeR::cpm(male_dgeList, log = TRUE)
+
+# 2. Transpose the data for WGCNA (genes should be in columns, samples in rows)
+datExpr <- t(lcpm)
+## Save a copy of the datExpr object for gene ontology analysis
+# write_rds(datExpr, output_wgcna_datExpr_file)
+
+# 3. Check for good genes and samples (optional but recommended)
+gsg <- goodSamplesGenes(datExpr, verbose = 3)
+if (!gsg$allOK) {
+  datExpr <- datExpr[gsg$goodSamples, gsg$goodGenes]
+}
+
+# 4. Run the pickSoftThreshold function to choose an appropriate power
+powers <- c(seq(1, 10,by = 1),
+            seq(12, 30, by = 2))  # Define a range of soft-thresholding powers
+sft <- pickSoftThreshold(data = datExpr,
+                         networkType = "signed",
+                         powerVector = powers,
+                         verbose = 5)
+
+# 5. Inspect the results
+print(sft$powerEstimate)
+
+# Plot the results (optional)
+plot(sft$fitIndices[,1], -sign(sft$fitIndices[,3])*sft$fitIndices[,2],
+     xlab = "Soft Threshold (power)", ylab = "Scale Free Topology Model Fit, signed R^2",
+     type = "n", main = "Scale independence")
+text(sft$fitIndices[,1], -sign(sft$fitIndices[,3])*sft$fitIndices[,2],
+     labels = powers, cex = 0.9, col = "red")
+abline(h = 0.90, col = "red")  # Threshold for selecting a suitable power
+
+plot(sft$fitIndices[,1], sft$fitIndices[,5],
+     xlab = "Soft Threshold (power)", ylab = "Mean Connectivity",
+     type = "n", main = "Mean Connectivity")
+text(sft$fitIndices[,1], sft$fitIndices[,5],
+     labels = powers, cex = 0.9, col = "red")
+abline(h = 0.90, col = "red")  # Threshold for selecting a suitable power
+
+```
+
+The `pickSoftThreshold` function suggests the most appropriate soft-thresholding power to be used in network construction.  
+`r sft$powerEstimate` is the soft-thresholding power suggested.  
+
+Next the adjacency matrix will be created for the formation of the gene co-expression network  
+
+The **adjacency matrix** is a matrix that where the genes are both the columns and rows and the matrix is filled with the correlation value between each pair of genes.
+
+In developing a network, the direction of the correlation of genes is important. The stringency applied when identifying biologically significant modules will increase by only identifying those genes which are positively correlated with one another.
+
+## Apply the adjacency function using the soft threshold
+
+```{r}
+
+# set the soft power identified earlier
+softPower <- sft$powerEstimate
+
+# create the adjacency matrix: Adjacency Matrix: Represents how strongly genes are connected to each other based on their expression.
+# The adjacency matrix represents the pairwise connection strength between genes based on their expression levels. The adjacency function applies the power transformation to the correlation matrix of the expression data, raising the correlations to the specified power to emphasize stronger correlations and reduce weaker correlations. This is essential for network construction in WGCNA.
+# The resulting adjacency matrix has values between 0 and 1, representing the strength of connections between genes.
+adjacency <- adjacency(datExpr,
+                       type = "signed",
+                       power = softPower)
+dim(adjacency) # 2077 2077
+
+```
+
+# Calculate the Topological Overlap Matrix (TOM)
+TOM: Refines these connections by considering shared neighbors (i.e., indirect connections between genes).  
+The TOM measures the interconnectedness of genes by considering not only the direct correlation between two genes but also the genes they are connected to. Genes with a high TOM value are part of a tightly connected network or module.  
+The TOM matrix refines the adjacency matrix by identifying modules of genes that are highly interconnected.  
+The TOM matrix, like the adjacency matrix, contains values between 0 and 1. Higher values in the TOM matrix indicate stronger connections between genes in terms of their shared neighbors in the network.  
+
+```{r}
+
+# Calculate the TOM and the dissimilarity matrix (based on topological overlap)
+TOM <- TOMsimilarity(adjMat=adjacency,
+                     TOMType="signed") # specify the "signed" network
+
+# Calculate the dissimilarity matrix (or distance matrix) based on the TOM. Dissimilarity Matrix (dissTOM): Converts the TOM into a distance measure, which is used for clustering genes into co-expression modules
+dissTOM <- 1-TOM
+dim(dissTOM) # 2077 2077
+
+# Construct modules: cluster genes into co-expression modules
+geneTree <- hclust(as.dist(dissTOM),
+                   method = "average")
+
+# Module identification using dynamic tree cut
+dynamicModules <- cutreeDynamic(dendro = geneTree,
+                                distM = dissTOM,
+                                deepSplit = 4,
+                                pamRespectsDendro = FALSE,
+                                minClusterSize = 30)
+table(dynamicModules)
+# how many modules do we have?
+length(table(dynamicModules)) # 19 modules including the grey module
+
+# convert numeric labels into colours (modules are initially assigned a number)
+dynamicColours <- labels2colors(dynamicModules)
+# table giving the number of genes in each un-merged cluster
+unmergedClusters <- data.frame(table(dynamicColours))
+
+# plot dendrogram with colour modules
+# png(file = output_stepByStepDendrogramModules_file,
+#     width = 12,
+#     height = 6,
+#     units = "in",
+#     res = 150)
+plotDendroAndColors(geneTree,
+     dynamicColours,
+     "Dynamic Tree Cut",
+     dendroLabels = FALSE,
+     hang = 0.03,
+     addGuide = TRUE,
+     guideHang = 0.05,
+     main = "Gene Dendrogram")
+# dev.off()
+
+# Create a data frame showing which un-merged module each gene is assigned to
+unmerged_gene_module_table <- data.frame(
+  Gene = colnames(datExpr),
+  Module = dynamicColours
+)
+```
+
+# Merge modules 
+This code merges similar gene co-expression modules based on how correlated their eigengenes (module expression summaries) are.  
+Modules with highly similar expression patterns across samples may represent overlapping biology. Merging them simplifies interpretation and helps avoid issues in downstream analyses like GSEA, especially when some modules are very small.  
+
+```{r}
+
+# Merge Modules
+## Calculate Eigengenes to summarise each module’s expression profile.
+MEList <- moduleEigengenes(datExpr,
+                           colors = dynamicColours)
+MEs <- MEList$eigengenes
+
+# Compute dissimilarity: measure how different the eigengenes are (1 − correlation).
+MEDiss <- 1-cor(MEs)
+
+# Cluster module eigengenes to identify groups of similar modules.
+METree <- hclust(as.dist(MEDiss),
+                 method = "average")
+
+# Plot the result - clusters of similarity based on eigengene
+plot(METree,
+     main = "Clustering of Module Eigengenes",
+     xlab = "",
+     sub = "")
+
+# We have 19 modules which means some have very few genes. We might like to merge some of the modules to help with downstream GSEA
+# Merge similar modules based on a 15% similarity (ie combine modules whose eigengenes are ≥85% correlated (cutHeight = 0.15)).
+MEDissThreshold <- 0.15
+abline(h = MEDissThreshold, col = "red")
+merge <- mergeCloseModules(exprData = datExpr,
+                           colors = dynamicColours,
+                           cutHeight = MEDissThreshold,
+                           verbose = 3)
+
+# recode the default module colours with something a bit more dynamic for figures
+# Define the colour mapping
+colour_map <- c(
+  "salmon" = "black",   # 
+  "cyan" = "orange",     # 
+  "black" = "darkblue",    # 
+  "brown" = "lightblue",    # 
+  "grey60" = "pink",   # 
+  "tan" = "green",      # 
+  "grey" = "grey",        # grey
+  "red" = "red",      # 
+  "purple" = "purple"    # 
+)
+
+# Extract current column names
+old_names <- colnames(merge$newMEs)
+
+# Remove the "ME" prefix to isolate the module colours
+module_colours <- substring(old_names, 3)
+
+# Replace colours using the map
+new_colours <- ifelse(module_colours %in% names(colour_map),
+                      colour_map[module_colours],
+                      module_colours)  # leave as-is if no match
+
+# Reapply "ME" prefix
+new_names <- paste0("ME", new_colours)
+
+# Assign new names back to the data frame
+colnames(merge$newMEs) <- new_names
+
+# recode the colours in merge$colors
+merge$colors <- recode(merge$colors,
+  "salmon" = "black",   # 
+  "cyan" = "orange",     # 
+  "black" = "darkblue",    # 
+  "brown" = "lightblue",    # 
+  "grey60" = "pink",   # 
+  "tan" = "green",      # 
+  "grey" = "grey",        # grey
+  "red" = "red",      # 
+  "purple" = "purple"    # 
+                        )
+
+# save the merged colours for gene ontology analysis
+# write_rds(mergedColours,
+#           output_wgcna_merged_modules_colours_file)
+
+# # how many modules do we have?
+length(table(merge$colors)) # 9
+
+# Create a data frame showing which merged module each gene is assigned to
+merged_gene_module_table <- data.frame(
+  Gene = colnames(datExpr),
+  Module = merge$colors
+)
+
+# Compute how many genes are in each module
+merged_module_summary <- merged_gene_module_table %>%
+  group_by(Module) %>%
+  summarise(GeneCount = n()) %>%
+  arrange(desc(GeneCount))
+
+# sample by sample of eigengene expression values for the merged clusters
+mergedMEs <- merge$newMEs 
+
+# Plot merged module tree
+# png(file = output_stepByStepDendrogramModulesMerged_file,
+#     width = 12,
+#     height = 6,
+#     units = "in",
+#     res = 150)
+plotDendroAndColors(geneTree,
+                    cbind(dynamicColours, merge$colors), # unmerged and merged colours
+                    c("Dynamic Tree Cut", "Merged Dynamic"),
+                    dendroLabels = FALSE, 
+                    hang = 0.03,
+                    addGuide = TRUE,
+                    guideHang = 0.05)  
+# dev.off()
+# write.table(merge$oldMEs,file=output_oldMEs_file)
+# write.table(merge$newMEs,file=output_newMEs_file)
+
+```
+
+# Export network to Cytoscape (for use in Gephi)
+```{r}
+# define the edge threshold
+threshold <- 0.5
+moduleColors <- merge$colors
+
+cyto_object <- exportNetworkToCytoscape(adjMat = adjacency,
+                                        edgeFile = file.path(outdir, 'Cytoscape_edge_file.tsv'),
+                                        nodeFile = file.path(outdir, 'Cytoscape_node_file.tsv'),
+                                        weighted = TRUE,
+                                        threshold = threshold, # default 0.5
+                                        nodeAttr = moduleColors,
+                                        includeColNames = TRUE)
+
+# The export to cytoscape function doesn't use the "Source", "Target" column names that Gephi uses so I will generate a new file here
+newEdge_gephi <- cyto_object$edgeData %>%
+  dplyr::select(., Source = fromNode, Target = toNode, weight, direction)
+
+write_delim(newEdge_gephi, file.path(paste0(outdir, "/Cytoscape_edges_source_target_", threshold, ".tsv")), delim = "\t")
+
+# Get the set of significant genes (FDR < 0.05)
+sig_genes <- allTable_male %>%
+  dplyr::filter(`adj.P.Val` < 0.05) %>%
+  dplyr::pull(hgnc_symbol)
+
+newNode_gephi <- cyto_object$nodeData %>%
+  dplyr::select(., Id = nodeName, Label = nodeName, module = `nodeAttr[nodesPresent, ]`) %>%
+  dplyr::mutate(DE = ifelse(Label %in% sig_genes, 1, 0))
+dim(newNode_gephi)
+
+write_delim(newNode_gephi, file.path(paste0(outdir, "/Cytoscape_nodes_Id_label_", threshold, ".tsv")), delim = "\t")
+
+```
+
