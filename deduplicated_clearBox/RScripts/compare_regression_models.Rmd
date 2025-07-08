@@ -1,0 +1,873 @@
+---
+title: "compare regression models (deduplicated; none, bmi, maternal age)"
+author: "Melanie Smith"
+date: "7th July 2025"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+The aim of this script is to understand how much of the DE signal is coming from BMI  
+
+
+# Load required libraries
+```{r load Libraries, echo=FALSE}
+library(plyr)
+library(reshape2)
+library(dplyr)
+library(stringr)
+library(edgeR)
+library(readxl)
+library(readr)
+library(magrittr)
+library(tibble)
+library(ggplot2)
+library(ggbeeswarm)
+library(ggrepel)
+library(cowplot)
+library(pheatmap)
+```
+
+# Set directories and files
+```{r}
+
+# set project directory
+projectDir <- "/home/smit1924/preeclampsia_sex_chromosome_informed"
+# projectDir <- "/Users/pillmaka/Desktop/Melanie/drive-download"
+
+# input files
+# base no-covariate model
+input_allTable_male <- file.path(projectDir, "deduplicated_clearBox/output/58_sample_noCovariate/allTable_male.csv")
+input_allTable_female <- file.path(projectDir, "deduplicated_clearBox/output/58_sample_noCovariate/allTable_female.csv")
+
+# BMI as covariate model
+input_allTable_male_bmi <- file.path(projectDir, "deduplicated_clearBox/output/58_sample_bmiCovariate/allTable_male.csv")
+input_allTable_female_bmi <- file.path(projectDir, "deduplicated_clearBox/output/58_sample_bmiCovariate/allTable_female.csv")
+
+# Maternal age as covariate model
+input_allTable_male_maternalAge <- file.path(projectDir, "deduplicated_clearBox/output/58_sample_maternalAgeCovariate/allTable_male.csv")
+input_allTable_female_maternalAge <- file.path(projectDir, "deduplicated_clearBox/output/58_sample_maternalAgeCovariate/allTable_female.csv")
+
+# BME and maternal age covariate model
+
+
+metadata_file <- file.path(projectDir, "clearBoxRawData/cleanSampleMetadata.csv")
+
+# set the output directory
+outdir <- file.path(projectDir, "deduplicated_clearBox/output/compare_regression_models")
+
+# output files
+
+# set figure files
+## No covariate compared to bmi as covariate
+output_scatterplot_logFC_noCovariate_bmi_male_file <- file.path(outdir, "scatterplot_logFC_noCovariate_bmi_male.png")
+output_scatterplot_adj.P.Val_noCovariate_bmi_male_file <- file.path(outdir, "scatterplot_adj.P.Val_noCovariate_bmi_male.png")
+output_scatterplot_logFC_noCovariate_bmi_female_file <- file.path(outdir, "scatterplot_logFC_noCovariate_bmi_female.png")
+output_scatterplot_P.Val_noCovariate_bmi_female_file <- file.path(outdir, "scatterplot_adj.P.Val_noCovariate_bmi_female.png")
+
+## No covariate compared to maternal age as covariate
+output_scatterplot_logFC_noCovariate_maternalAge_male_file <- file.path(outdir, "scatterplot_logFC_noCovariate_maternalAge_male.png")
+output_scatterplot_adj.P.Val_noCovariate_maternalAge_male_file <- file.path(outdir, "scatterplot_adj.P.Val_noCovariate_maternalAge_male.png")
+output_scatterplot_logFC_noCovariate_maternalAge_female_file <- file.path(outdir, "scatterplot_logFC_noCovariate_maternalAge_female.png")
+output_scatterplot_P.Val_noCovariate_maternalAge_female_file <- file.path(outdir, "scatterplot_adj.P.Val_noCovariate_maternalAge_female.png")
+
+## Save the panel plots
+output_panel_plot_male_file <- file.path(outdir, "panelPlot_male.png")
+output_panel_plot_female_file <- file.path(outdir, "panelPlot_female.png")
+
+dir.create(outdir)
+
+```
+
+# Functions
+
+```{r}
+# updated function to pull the legend
+## this is an issue with the female plots because most of the colour legend components are blank
+## I found this solution on stack exchange here <https://stackoverflow.com/questions/78163631/r-get-legend-from-cowplot-package-no-longer-work-for-ggplot2-version-3-5-0>
+get_legend2 <- function(plot, legend = NULL) {
+  if (is.ggplot(plot)) {
+    gt <- ggplotGrob(plot)
+  } else {
+    if (is.grob(plot)) {
+      gt <- plot
+    } else {
+      stop("Plot object is neither a ggplot nor a grob.")
+    }
+  }
+  pattern <- "guide-box"
+  if (!is.null(legend)) {
+    pattern <- paste0(pattern, "-", legend)
+  }
+  indices <- grep(pattern, gt$layout$name)
+  not_empty <- !vapply(
+    gt$grobs[indices], 
+    inherits, what = "zeroGrob", 
+    FUN.VALUE = logical(1)
+  )
+  indices <- indices[not_empty]
+  if (length(indices) > 0) {
+    return(gt$grobs[[indices[1]]])
+  }
+  return(NULL)
+}
+```
+
+
+# Import allTable files
+```{r}
+# No covariate model
+allTable_male <- readr::read_csv(file = input_allTable_male)
+allTable_female <- readr::read_csv(file = input_allTable_female)
+
+# BMI as covariate model
+allTable_male_bmi <- readr::read_csv(file = input_allTable_male_bmi)
+allTable_female_bmi <- readr::read_csv(file = input_allTable_female_bmi)
+
+# Maternal age as covariate model
+allTable_male_maternalAge <- readr::read_csv(file = input_allTable_male_maternalAge)
+allTable_female_maternalAge <- readr::read_csv(file = input_allTable_female_maternalAge)
+```
+
+# Combine allTable objects male
+```{r}
+# Combine the allTables using descriptive column headers
+combined_allTable_male <- dplyr::left_join(dplyr::select(allTable_male, ensembl, hgnc_symbol, logFC_male = logFC, adj.P.Val_male = adj.P.Val),
+                                           dplyr::select(allTable_male_bmi, ensembl, hgnc_symbol, logFC_male_bmi = logFC, adj.P.Val_male_bmi = adj.P.Val),
+                                           by = join_by(ensembl, hgnc_symbol)) %>%
+  dplyr::left_join(., dplyr::select(allTable_male_maternalAge, ensembl, hgnc_symbol, logFC_male_maternalAge = logFC, adj.P.Val_male_maternalAge = adj.P.Val),
+                   by = join_by(ensembl, hgnc_symbol))
+
+# Create significance categories between no covariate and BMI using consensus approach
+combined_allTable_male <- combined_allTable_male %>%
+  mutate(
+    # Define significance threshold
+    sig_threshold = 0.05,
+    
+    # Create significance categories
+    sig_category_no_bmi = case_when(
+      adj.P.Val_male < sig_threshold & adj.P.Val_male_bmi < sig_threshold ~ "Both significant",
+      adj.P.Val_male < sig_threshold & adj.P.Val_male_bmi >= sig_threshold ~ "Only base model significant",
+      adj.P.Val_male >= sig_threshold & adj.P.Val_male_bmi < sig_threshold ~ "Only BMI covariate model significant",
+      adj.P.Val_male >= sig_threshold & adj.P.Val_male_bmi >= sig_threshold ~ "Neither significant"
+    ),
+    
+    # Factor for consistent ordering in legend
+    sig_category_no_bmi = factor(sig_category_no_bmi, 
+                         levels = c("Both significant", "Only base model significant", 
+                                   "Only BMI covariate model significant", "Neither significant"))
+  ) %>%
+# Create significance categories between no covariate and maternal age using consensus approach  
+    mutate(
+    # Define significance threshold
+    sig_threshold = 0.05,
+    
+    # Create significance categories
+    sig_category_no_maternalAge = case_when(
+      adj.P.Val_male < sig_threshold & adj.P.Val_male_maternalAge < sig_threshold ~ "Both significant",
+      adj.P.Val_male < sig_threshold & adj.P.Val_male_maternalAge >= sig_threshold ~ "Only base model significant",
+      adj.P.Val_male >= sig_threshold & adj.P.Val_male_maternalAge < sig_threshold ~ "Only maternal age covariate model significant",
+      adj.P.Val_male >= sig_threshold & adj.P.Val_male_maternalAge >= sig_threshold ~ "Neither significant"
+    ),
+    
+    # Factor for consistent ordering in legend
+    sig_category_no_maternalAge = factor(sig_category_no_maternalAge, 
+                         levels = c("Both significant", "Only base model significant", 
+                                   "Only maternal age covariate model significant", "Neither significant"))
+  )
+  
+
+
+```
+
+## Scatter plot to compare logFC of the no covariate and BMI as covariate models male
+
+```{r}
+
+# Calculate axis limits to ensure square plot
+axis_limits <- range(c(combined_allTable_male$logFC_male, combined_allTable_male$logFC_male_bmi), na.rm = TRUE)
+axis_limits <- c(floor(axis_limits[1] * 1.1), ceiling(axis_limits[2] * 1.1))
+
+# Create the logFC plot
+logFC_noCovariate_bmi_male <- ggplot(data = combined_allTable_male, aes(x = logFC_male, y = logFC_male_bmi)) +
+  
+  # Add x=y reference line
+  geom_abline(intercept = 0, slope = 1, linetype = "dashed", color = "gray50", linewidth = 0.8) +
+  
+  # Add all points in grey as background layer
+  geom_point(alpha = 0.4, size = 1.2, color = "lightgray") +
+  
+  # Overlay significant points on top
+  geom_point(data = filter(combined_allTable_male, sig_category_no_bmi != "Neither significant"),
+             aes(color = sig_category_no_bmi), alpha = 0.8, size = 1.5) +
+  
+  # Custom color palette
+  scale_color_manual(
+    name = "Significance",
+    values = c(
+      "Both significant" = "#8B0000",          # Dark red - strongest evidence
+      "Only base model significant" = "#FF6B6B", # Light red - Model 1 only
+      "Only BMI covariate model significant" = "#4ECDC4", # Teal - Model 2 only  
+      "Neither significant" = "#D3D3D3"       # Light gray - no evidence
+    )
+  ) +
+  
+  # Set equal axis limits for square plot
+  xlim(axis_limits) +
+  ylim(axis_limits) +
+  
+  # Ensure 1:1 aspect ratio
+  coord_fixed(ratio = 1) +
+  
+  # Clean theme
+  theme_minimal() +
+  theme(
+    panel.grid.minor = element_blank(),
+    legend.position = "bottom",
+    legend.title = element_text(size = 12, face = "bold"),
+    axis.title = element_text(size = 12, face = "bold"),
+    plot.title = element_text(size = 14, face = "bold", hjust = 0.5),
+    plot.subtitle = element_text(size = 11, hjust = 0.5, color = "gray30")
+  ) +
+  
+  # Labels
+  labs(
+    x = "logFC (Male Model)",
+    y = "logFC (Male + BMI Model)"
+  ) +
+  
+  # Guide for better legend
+  guides(color = guide_legend(override.aes = list(size = 3, alpha = 1)))
+# save the plot output
+ggsave(filename = output_scatterplot_logFC_noCovariate_bmi_male_file,
+       plot = logFC_noCovariate_bmi_male,
+       width = 8,
+       height = 8,
+       units = "in",
+       dpi = 150)
+
+```
+
+## Scatter plot to compare adj.P.Val of the no covariate and BMI as covariate models male
+
+```{r}
+
+# Calculate axis limits to ensure square plot
+axis_limits <- range(c(-log10(combined_allTable_male$adj.P.Val_male), -log10(combined_allTable_male$adj.P.Val_male_bmi)), na.rm = TRUE)
+axis_limits <- c(floor(axis_limits[1] * 1.1), ceiling(axis_limits[2] * 1.1))
+
+# Create the plot
+adj.P.Val_noCovariate_bmi_male <- ggplot(data = combined_allTable_male, aes(x = -log10(adj.P.Val_male), y = -log10(adj.P.Val_male_bmi))) +
+  
+  # Add x=y reference line
+  geom_abline(intercept = 0, slope = 1, linetype = "dashed", color = "gray50", linewidth = 0.8) +
+  
+  # Add all points in grey as background layer
+  geom_point(alpha = 0.4, size = 1.2, color = "lightgray") +
+  
+  # Overlay significant points on top
+  geom_point(data = filter(combined_allTable_male, sig_category_no_bmi != "Neither significant"),
+             aes(color = sig_category_no_bmi), alpha = 0.8, size = 1.5) +
+  
+  # Custom color palette
+  scale_color_manual(
+    name = "Significance",
+    values = c(
+      "Both significant" = "#8B0000",         # Dark red - strongest evidence
+      "Only base model significant" = "#FF6B6B", # Light red - Model 1 only
+      "Only BMI covariate model significant" = "#4ECDC4", # Teal - Model 2 only  
+      "Neither significant" = "#D3D3D3"       # Light gray - no evidence
+    )
+  ) +
+  
+  # Set equal axis limits for square plot
+  xlim(axis_limits) +
+  ylim(axis_limits) +
+  
+  # Ensure 1:1 aspect ratio
+  coord_fixed(ratio = 1) +
+  
+  # Clean theme
+  theme_minimal() +
+  theme(
+    panel.grid.minor = element_blank(),
+    legend.position = "bottom",
+    legend.title = element_text(size = 12, face = "bold"),
+    axis.title = element_text(size = 12, face = "bold"),
+    plot.title = element_text(size = 14, face = "bold", hjust = 0.5),
+    plot.subtitle = element_text(size = 11, hjust = 0.5, color = "gray30")
+  ) +
+  
+  # Labels
+  labs(
+    x = "-log10 adjusted p-value (outcome only model)",
+    y = "-log10 adjusted P-value (outcome + BMI model)"
+  ) +
+  
+  # Guide for better legend
+  guides(color = guide_legend(override.aes = list(size = 3, alpha = 1)))
+
+# save the plot output
+ggsave(filename = output_scatterplot_adj.P.Val_noCovariate_bmi_male_file,
+       plot = adj.P.Val_noCovariate_bmi_male,
+       width = 8,
+       height = 8,
+       units = "in",
+       dpi = 150)
+
+```
+
+## Scatter plot to compare logFC of the no covariate and maternal age as covariate models male
+
+```{r}
+
+# Calculate axis limits to ensure square plot
+axis_limits <- range(c(combined_allTable_male$logFC_male, combined_allTable_male$logFC_male_maternalAge), na.rm = TRUE)
+axis_limits <- c(floor(axis_limits[1] * 1.1), ceiling(axis_limits[2] * 1.1))
+
+# Create the logFC plot
+logFC_noCovariate_maternalAge_male <- ggplot(data = combined_allTable_male, aes(x = logFC_male, y = logFC_male_maternalAge)) +
+  
+  # Add x=y reference line
+  geom_abline(intercept = 0, slope = 1, linetype = "dashed", color = "gray50", linewidth = 0.8) +
+  
+  # Add all points in grey as background layer
+  geom_point(alpha = 0.4, size = 1.2, color = "lightgray") +
+  
+  # Overlay significant points on top
+  geom_point(data = filter(combined_allTable_male, sig_category_no_maternalAge != "Neither significant"),
+             aes(color = sig_category_no_maternalAge), alpha = 0.8, size = 1.5) +
+  
+  # Custom color palette
+  scale_color_manual(
+    name = "Significance",
+    values = c(
+      "Both significant" = "#8B0000",         # Dark red - strongest evidence
+      "Only base model significant" = "#FF6B6B", # Light red - Model 1 only
+      "Only maternal age covariate model significant" = "#4ECDC4", # Teal - Model 2 only  
+      "Neither significant" = "#D3D3D3"       # Light gray - no evidence
+    )
+  ) +
+  
+  # Set equal axis limits for square plot
+  xlim(axis_limits) +
+  ylim(axis_limits) +
+  
+  # Ensure 1:1 aspect ratio
+  coord_fixed(ratio = 1) +
+  
+  # Clean theme
+  theme_minimal() +
+  theme(
+    panel.grid.minor = element_blank(),
+    legend.position = "bottom",
+    legend.title = element_text(size = 12, face = "bold"),
+    axis.title = element_text(size = 12, face = "bold"),
+    plot.title = element_text(size = 14, face = "bold", hjust = 0.5),
+    plot.subtitle = element_text(size = 11, hjust = 0.5, color = "gray30")
+  ) +
+  
+  # Labels
+  labs(
+    x = "logFC (outcome only model)",
+    y = "logFC (outcome + maternal age model)"
+  ) +
+  
+  # Guide for better legend
+  guides(color = guide_legend(override.aes = list(size = 3, alpha = 1)))
+# save the plot output
+ggsave(filename = output_scatterplot_logFC_noCovariate_maternalAge_male_file,
+       plot = logFC_noCovariate_maternalAge_male,
+       width = 8,
+       height = 8,
+       units = "in",
+       dpi = 150)
+
+# Optional: Print summary of significance categories
+cat("Summary of significance categories:\n")
+print(table(combined_allTable_male$sig_category_no_maternalAge, useNA = "ifany"))
+```
+
+## Scatter plot to compare adj.P.Val of the no covariate and maternal age as covariate models male
+
+```{r}
+
+# Calculate axis limits to ensure square plot
+axis_limits <- range(c(-log10(combined_allTable_male$adj.P.Val_male), -log10(combined_allTable_male$adj.P.Val_male_maternalAge)), na.rm = TRUE)
+axis_limits <- c(floor(axis_limits[1] * 1.1), ceiling(axis_limits[2] * 1.1))
+
+# Create the plot
+adj.P.Val_noCovariate_maternalAge_male <- ggplot(data = combined_allTable_male, aes(x = -log10(adj.P.Val_male), y = -log10(adj.P.Val_male_maternalAge))) +
+  
+  # Add x=y reference line
+  geom_abline(intercept = 0, slope = 1, linetype = "dashed", color = "gray50", linewidth = 0.8) +
+  
+  # Add all points in grey as background layer
+  geom_point(alpha = 0.4, size = 1.2, color = "lightgray") +
+  
+  # Overlay significant points on top
+  geom_point(data = filter(combined_allTable_male, sig_category_no_maternalAge != "Neither significant"),
+             aes(color = sig_category_no_maternalAge), alpha = 0.8, size = 1.5) +
+  
+  # Custom color palette
+  scale_color_manual(
+    name = "Significance",
+    values = c(
+      "Both significant" = "#8B0000",         # Dark red - strongest evidence
+      "Only base model significant" = "#FF6B6B", # Light red - Model 1 only
+      "Only maternal age covariate model significant" = "#4ECDC4", # Teal - Model 2 only  
+      "Neither significant" = "#D3D3D3"       # Light gray - no evidence
+    )
+  ) +
+  
+  # Set equal axis limits for square plot
+  xlim(axis_limits) +
+  ylim(axis_limits) +
+  
+  # Ensure 1:1 aspect ratio
+  coord_fixed(ratio = 1) +
+  
+  # Clean theme
+  theme_minimal() +
+  theme(
+    panel.grid.minor = element_blank(),
+    legend.position = "bottom",
+    legend.title = element_text(size = 12, face = "bold"),
+    axis.title = element_text(size = 12, face = "bold"),
+    plot.title = element_text(size = 14, face = "bold", hjust = 0.5),
+    plot.subtitle = element_text(size = 11, hjust = 0.5, color = "gray30")
+  ) +
+  
+  # Labels
+  labs(
+    x = "-log10 adjusted p-value (outcome only model)",
+    y = "-log10 adjusted P-value (outcome + maternal age model)"
+  ) +
+  
+  # Guide for better legend
+  guides(color = guide_legend(override.aes = list(size = 3, alpha = 1)))
+
+# save the plot output
+ggsave(filename = output_scatterplot_adj.P.Val_noCovariate_maternalAge_male_file,
+       plot = adj.P.Val_noCovariate_maternalAge_male,
+       width = 8,
+       height = 8,
+       units = "in",
+       dpi = 150)
+
+```
+
+## Panel plot male
+
+```{r}
+# Step 1: Extract the legend from one of the plots (must include a legend!)
+# get the legend
+plot_legend_male <- get_legend2(logFC_noCovariate_bmi_male)
+
+# Step 2: Remove legends from all individual plots
+logFC_noCovariate_bmi_male_no_legend <- logFC_noCovariate_bmi_male + theme(legend.position = "none")
+adj.P.Val_noCovariate_bmi_male_no_legend <- adj.P.Val_noCovariate_bmi_male + theme(legend.position = "none")
+logFC_noCovariate_maternalAge_male_no_legend <- logFC_noCovariate_maternalAge_male + theme(legend.position = "none")
+adj.P.Val_noCovariate_maternalAge_male_no_legend <- adj.P.Val_noCovariate_maternalAge_male + theme(legend.position = "none")
+
+# Step 3: Create the 2x2 panel without legends
+panel_only_male <- plot_grid(
+  logFC_noCovariate_bmi_male_no_legend,
+  adj.P.Val_noCovariate_bmi_male_no_legend,
+  logFC_noCovariate_maternalAge_male_no_legend,
+  adj.P.Val_noCovariate_maternalAge_male_no_legend,
+  labels = c("a", "b", "c", "d"),
+  label_size = 14,
+  label_fontface = "bold",
+  ncol = 2,
+  align = "hv"
+)
+
+# Step 4: Combine panel and legend
+panel_plot_male <- plot_grid(
+  panel_only_male,
+  plot_legend_male,
+  ncol = 1,
+  rel_heights = c(1, 0.1)  # Adjust as needed to balance panel and legend height
+)
+
+# Step 5: (Optional) Save the combined figure
+ggsave(filename = output_panel_plot_male_file,
+       plot = panel_plot_male,
+       width = 11,
+       height = 11,
+       dpi = 300)
+```
+
+
+# Combine allTable objects female
+```{r}
+# Combine the allTables using descriptive column headers
+combined_allTable_female <- dplyr::left_join(dplyr::select(allTable_female, ensembl, hgnc_symbol, logFC_female = logFC, adj.P.Val_female = adj.P.Val, P.Value_female = P.Value),
+                                           dplyr::select(allTable_female_bmi, ensembl, hgnc_symbol, logFC_female_bmi = logFC, adj.P.Val_female_bmi = adj.P.Val, P.Value_female_bmi = P.Value),
+                                           by = join_by(ensembl, hgnc_symbol)) %>%
+  dplyr::left_join(., dplyr::select(allTable_female_maternalAge, ensembl, hgnc_symbol, logFC_female_maternalAge = logFC, adj.P.Val_female_maternalAge = adj.P.Val, P.Value_female_maternalAge = P.Value),
+                   by = join_by(ensembl, hgnc_symbol))
+
+# Create significance categories between no covariate and BMI using consensus approach
+combined_allTable_female <- combined_allTable_female %>%
+  mutate(
+    # Define significance threshold
+    sig_threshold = 0.05,
+    
+    # Create significance categories
+    sig_category_no_bmi = case_when(
+      adj.P.Val_female < sig_threshold & adj.P.Val_female_bmi < sig_threshold ~ "Both significant",
+      adj.P.Val_female < sig_threshold & adj.P.Val_female_bmi >= sig_threshold ~ "Only base model significant",
+      adj.P.Val_female >= sig_threshold & adj.P.Val_female_bmi < sig_threshold ~ "Only BMI covariate model significant",
+      adj.P.Val_female >= sig_threshold & adj.P.Val_female_bmi >= sig_threshold ~ "Neither significant"
+    ),
+    
+    # Factor for consistent ordering in legend
+    sig_category_no_bmi = factor(sig_category_no_bmi, 
+                                 levels = c("Both significant", "Only base model significant", 
+                                            "Only BMI covariate model significant", "Neither significant"))
+  ) %>%
+  # Create significance categories between no covariate and maternal age using consensus approach  
+  mutate(
+    # Define significance threshold
+    sig_threshold = 0.05,
+    
+    # Create significance categories
+    sig_category_no_maternalAge = case_when(
+      adj.P.Val_female < sig_threshold & adj.P.Val_female_maternalAge < sig_threshold ~ "Both significant",
+      adj.P.Val_female < sig_threshold & adj.P.Val_female_maternalAge >= sig_threshold ~ "Only base model significant",
+      adj.P.Val_female >= sig_threshold & adj.P.Val_female_maternalAge < sig_threshold ~ "Only maternal age covariate model significant",
+      adj.P.Val_female >= sig_threshold & adj.P.Val_female_maternalAge >= sig_threshold ~ "Neither significant"
+    )) %>%
+  mutate(sig_category_no_bmi = factor(sig_category_no_bmi, levels = c(
+    "Both significant",
+    "Only base model significant",
+    "Only BMI covariate model significant",
+    "Neither significant"
+  )))
+
+```
+
+## Scatter plot to compare logFC of the no covariate and BMI as a covariate models female
+
+```{r}
+# Calculate axis limits to ensure square plot
+axis_limits <- range(c(combined_allTable_female$logFC_female, combined_allTable_female$logFC_female_bmi), na.rm = TRUE)
+axis_limits <- c(floor(axis_limits[1] * 1.1), ceiling(axis_limits[2] * 1.1))
+
+# Explicitly set levels in the factor to ensure all categories are present
+combined_allTable_female <- combined_allTable_female %>%
+  mutate(sig_category_no_bmi = factor(sig_category_no_bmi, levels = c(
+    "Both significant",
+    "Only base model significant",
+    "Only BMI covariate model significant",
+    "Neither significant"
+  )))
+
+# Define custom color palette (without newline characters)
+logFC_noCovariate_bmi_female <- ggplot(data = combined_allTable_female, aes(x = logFC_female, y = logFC_female_bmi)) +
+  geom_abline(intercept = 0, slope = 1, linetype = "dashed", color = "gray50", linewidth = 0.8) +
+  geom_point(alpha = 0.4, size = 1.2, color = "lightgray", show.legend = FALSE) +
+  geom_point(data = filter(combined_allTable_female, sig_category_no_bmi != "Neither significant"),
+             aes(color = sig_category_no_bmi), alpha = 0.8, size = 1.5) +
+  scale_color_manual(
+    name = "Significance",
+    values = c(
+      "Both significant" = "#8B0000",            # Dark red
+      "Only base model significant" = "#FF6B6B", # Light red
+      "Only BMI covariate model significant" = "#4ECDC4", # Teal
+      "Neither significant" = "#D3D3D3"          # Light gray
+    ),
+    limits = c("Both significant", 
+               "Only base model significant", 
+               "Only BMI covariate model significant", 
+               "Neither significant")  # Force all categories to show
+  ) +
+  xlim(axis_limits) +
+  ylim(axis_limits) +
+  coord_fixed(ratio = 1) +
+  theme_minimal() +
+  theme(
+    panel.grid.minor = element_blank(),
+    legend.position = "bottom",
+    legend.title = element_text(size = 12, face = "bold"),
+    axis.title = element_text(size = 12, face = "bold"),
+    plot.title = element_text(size = 14, face = "bold", hjust = 0.5),
+    plot.subtitle = element_text(size = 11, hjust = 0.5, color = "gray30")
+  ) +
+  labs(
+    x = "logFC (outcome only model)",
+    y = "logFC (outcome + BMI model)"
+  ) +
+  guides(color = guide_legend(override.aes = list(size = 3, alpha = 1)))
+
+ggsave(filename = output_scatterplot_logFC_noCovariate_bmi_female_file,
+       plot = logFC_noCovariate_bmi_female,
+       width = 8,
+       height = 8,
+       units = "in",
+       dpi = 150)
+```
+
+## Scatter plot to compare P-value of the no covariate and BMI as covariate models female
+
+```{r}
+# Calculate axis limits to ensure square plot
+axis_limits <- range(c(-log10(combined_allTable_female$P.Value_female), -log10(combined_allTable_female$P.Value_female_bmi)), na.rm = TRUE)
+axis_limits <- c(floor(axis_limits[1] * 1.1), ceiling(axis_limits[2] * 1.1))
+
+# Create the plot
+P.Val_noCovariate_bmi_female <- ggplot(data = combined_allTable_female, aes(x = -log10(P.Value_female), y = -log10(P.Value_female_bmi))) +
+  
+  # Add x=y reference line
+  geom_abline(intercept = 0, slope = 1, linetype = "dashed", color = "gray50", linewidth = 0.8) +
+  
+  # Add all points in grey as background layer
+  geom_point(alpha = 0.4, size = 1.2, color = "lightgray") +
+  
+  # Overlay significant points on top
+  geom_point(data = filter(combined_allTable_female, sig_category_no_bmi != "Neither significant"),
+             aes(color = sig_category_no_bmi), alpha = 0.8, size = 1.5) +
+  
+  # Custom color palette
+  scale_color_manual(
+    name = "Significance",
+    values = c(
+      "Both significant" = "#8B0000",         # Dark red - strongest evidence
+      "Only base model significant" = "#FF6B6B", # Light red - Model 1 only
+      "Only BMI covariate model significant" = "#4ECDC4", # Teal - Model 2 only  
+      "Neither significant" = "#D3D3D3"       # Light gray - no evidence
+    ),
+    limits = c("Both significant", 
+               "Only base model significant", 
+               "Only BMI covariate model significant", 
+               "Neither significant")  # Force all categories to show
+  ) +
+  
+  # Set equal axis limits for square plot
+  xlim(axis_limits) +
+  ylim(axis_limits) +
+  
+  # Ensure 1:1 aspect ratio
+  coord_fixed(ratio = 1) +
+  
+  # Clean theme
+  theme_minimal() +
+  theme(
+    panel.grid.minor = element_blank(),
+    legend.position = "bottom",
+    legend.title = element_text(size = 12, face = "bold"),
+    axis.title = element_text(size = 12, face = "bold"),
+    plot.title = element_text(size = 14, face = "bold", hjust = 0.5),
+    plot.subtitle = element_text(size = 11, hjust = 0.5, color = "gray30")
+  ) +
+  
+  # Labels
+  labs(
+    x = "-log10 P-value (outcome only model)",
+    y = "-log10 P-value (outcome + BMI model)"
+  ) +
+  
+  # Guide for better legend
+  guides(color = guide_legend(override.aes = list(size = 3, alpha = 1)))
+
+# save the plot output
+ggsave(filename = output_scatterplot_P.Val_noCovariate_bmi_female_file,
+       plot = P.Val_noCovariate_bmi_female,
+       width = 8,
+       height = 8,
+       units = "in",
+       dpi = 150)
+```
+
+## Scatter plot to compare logFC of the no covariate and maternal age as covariate models female
+
+```{r}
+# Calculate axis limits to ensure square plot
+axis_limits <- range(c(combined_allTable_female$logFC_female, combined_allTable_female$logFC_female_maternalAge), na.rm = TRUE)
+axis_limits <- c(floor(axis_limits[1] * 1.1), ceiling(axis_limits[2] * 1.1))
+
+# Create the logFC plot
+logFC_noCovariate_maternalAge_female <- ggplot(data = combined_allTable_female, aes(x = logFC_female, y = logFC_female_maternalAge)) +
+  
+  # Add x=y reference line
+  geom_abline(intercept = 0, slope = 1, linetype = "dashed", color = "gray50", linewidth = 0.8) +
+  
+  # Add all points in grey as background layer
+  geom_point(alpha = 0.4, size = 1.2, color = "lightgray") +
+  
+  # Overlay significant points on top
+  geom_point(data = filter(combined_allTable_female, sig_category_no_maternalAge != "Neither significant"),
+             aes(color = sig_category_no_maternalAge), alpha = 0.8, size = 1.5) +
+  
+  # Custom color palette
+  scale_color_manual(
+    name = "Significance",
+    values = c(
+      "Both significant" = "#8B0000",         # Dark red - strongest evidence
+      "Only base model significant" = "#FF6B6B", # Light red - Model 1 only
+      "Only maternal age covariate model significant" = "#4ECDC4", # Teal - Model 2 only  
+      "Neither significant" = "#D3D3D3"       # Light gray - no evidence
+    ),
+    limits = c("Both significant", 
+               "Only base model significant", 
+               "Only BMI covariate model significant", 
+               "Neither significant")  # Force all categories to show
+  ) +
+  
+  # Set equal axis limits for square plot
+  xlim(axis_limits) +
+  ylim(axis_limits) +
+  
+  # Ensure 1:1 aspect ratio
+  coord_fixed(ratio = 1) +
+  
+  # Clean theme
+  theme_minimal() +
+  theme(
+    panel.grid.minor = element_blank(),
+    legend.position = "bottom",
+    legend.title = element_text(size = 12, face = "bold"),
+    axis.title = element_text(size = 12, face = "bold"),
+    plot.title = element_text(size = 14, face = "bold", hjust = 0.5),
+    plot.subtitle = element_text(size = 11, hjust = 0.5, color = "gray30")
+  ) +
+  
+  # Labels
+  labs(
+    x = "logFC (outcome only model)",
+    y = "logFC (outcome + maternal age model)"
+  ) +
+  
+  # Guide for better legend
+  guides(color = guide_legend(override.aes = list(size = 3, alpha = 1)))
+# save the plot output
+ggsave(filename = output_scatterplot_logFC_noCovariate_maternalAge_female_file,
+       plot = logFC_noCovariate_maternalAge_female,
+       width = 8,
+       height = 8,
+       units = "in",
+       dpi = 150)
+```
+
+## Scatter plot to compare P-value of the no covariate and maternal age as covariate model female
+
+```{r}
+# Calculate axis limits to ensure square plot
+axis_limits <- range(c(-log10(combined_allTable_female$P.Value_female), -log10(combined_allTable_female$P.Value_female_maternalAge)), na.rm = TRUE)
+axis_limits <- c(floor(axis_limits[1] * 1.1), ceiling(axis_limits[2] * 1.1))
+
+# Create the plot
+P.Value_noCovariate_maternalAge_female <- ggplot(data = combined_allTable_female, aes(x = -log10(P.Value_female), y = -log10(P.Value_female_maternalAge))) +
+  
+  # Add x=y reference line
+  geom_abline(intercept = 0, slope = 1, linetype = "dashed", color = "gray50", linewidth = 0.8) +
+  
+  # Add all points in grey as background layer
+  geom_point(alpha = 0.4, size = 1.2, color = "lightgray") +
+  
+  # Overlay significant points on top
+  geom_point(data = filter(combined_allTable_female, sig_category_no_maternalAge != "Neither significant"),
+             aes(color = sig_category_no_maternalAge), alpha = 0.8, size = 1.5) +
+  
+  # Custom color palette
+  scale_color_manual(
+    name = "Significance",
+    values = c(
+      "Both significant" = "#8B0000",         # Dark red - strongest evidence
+      "Only base model significant" = "#FF6B6B", # Light red - Model 1 only
+      "Only maternal age covariate model significant" = "#4ECDC4", # Teal - Model 2 only  
+      "Neither significant" = "#D3D3D3"       # Light gray - no evidence
+    ),
+    limits = c("Both significant", 
+               "Only base model significant", 
+               "Only BMI covariate model significant", 
+               "Neither significant")  # Force all categories to show
+  ) +
+  
+  # Set equal axis limits for square plot
+  xlim(axis_limits) +
+  ylim(axis_limits) +
+  
+  # Ensure 1:1 aspect ratio
+  coord_fixed(ratio = 1) +
+  
+  # Clean theme
+  theme_minimal() +
+  theme(
+    panel.grid.minor = element_blank(),
+    legend.position = "bottom",
+    legend.title = element_text(size = 12, face = "bold"),
+    axis.title = element_text(size = 12, face = "bold"),
+    plot.title = element_text(size = 14, face = "bold", hjust = 0.5),
+    plot.subtitle = element_text(size = 11, hjust = 0.5, color = "gray30")
+  ) +
+  
+  # Labels
+  labs(
+    x = "-log10 adjusted p-value (outcome only model)",
+    y = "-log10 adjusted P-value (outcome + maternal age model)"
+  ) +
+  
+  # Guide for better legend
+  guides(color = guide_legend(override.aes = list(size = 3, alpha = 1)))
+
+# save the plot output
+ggsave(filename = output_scatterplot_P.Val_noCovariate_maternalAge_female_file,
+       plot = P.Value_noCovariate_maternalAge_female,
+       width = 8,
+       height = 8,
+       units = "in",
+       dpi = 150)
+```
+
+## Panel plot female
+
+```{r}
+# get the legend
+plot_legend <- get_legend2(logFC_noCovariate_bmi_female)
+
+# Step 2: Remove legends from all individual plots
+logFC_noCovariate_bmi_female_no_legend <- logFC_noCovariate_bmi_female + theme(legend.position = "none")
+P.Val_noCovariate_bmi_female_no_legend <- P.Val_noCovariate_bmi_female + theme(legend.position = "none")
+logFC_noCovariate_maternalAge_female_no_legend <- logFC_noCovariate_maternalAge_female + theme(legend.position = "none")
+P.Value_noCovariate_maternalAge_female_no_legend <- P.Value_noCovariate_maternalAge_female + theme(legend.position = "none")
+
+# Step 3: Create the 2x2 panel without legends
+panel_only <- plot_grid(
+  logFC_noCovariate_bmi_female_no_legend,
+  P.Val_noCovariate_bmi_female_no_legend,
+  logFC_noCovariate_maternalAge_female_no_legend,
+  P.Value_noCovariate_maternalAge_female_no_legend,
+  labels = c("a", "b", "c", "d"),
+  label_size = 14,
+  label_fontface = "bold",
+  ncol = 2,
+  align = "hv"
+)
+
+# Step 4: Combine panel and legend
+panel_plot_female <- plot_grid(
+  panel_only,
+  plot_legend,
+  ncol = 1,
+  rel_heights = c(1, 0.1)  # Adjust as needed to balance panel and legend height
+)
+
+# Step 5: (Optional) Save the combined figure
+ggsave(filename = output_panel_plot_female_file,
+       plot = panel_plot_female,
+       width = 11,
+       height = 11,
+       dpi = 300)
+
+```
+
+
+
+
+
+
