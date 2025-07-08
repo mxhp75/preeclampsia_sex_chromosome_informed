@@ -1,0 +1,357 @@
+---
+title: "58 sample maternal age covariate"
+author: "Melanie Smith"
+date: "07 July 2025"
+output: html_document
+---
+
+# Load required libraries
+```{r load Libraries, echo=FALSE}
+library(plyr)
+library(reshape2)
+library(dplyr)
+library(stringr)
+library(edgeR)
+library(readxl)
+library(readr)
+library(magrittr)
+library(tibble)
+library(ggplot2)
+library(ggbeeswarm)
+library(ggrepel)
+library(pheatmap)
+```
+
+# Set directories and files
+```{r}
+
+# set project directory
+projectDir <- "/home/smit1924/preeclampsia_sex_chromosome_informed"
+# projectDir <- "/Users/pillmaka/Desktop/Melanie/drive-download"
+
+# input files
+input_dgelist_file <- file.path(projectDir, "deduplicated_clearBox/output/filt_norm_dgelist_58_post_dedup.rds")
+# set the output directory
+outdir <- file.path(projectDir, "deduplicated_clearBox/output/58_sample_maternalAgeCovariate")
+
+# output files
+outDesignMatrix_file <- file.path(outdir, "designMatrix.csv")
+
+
+# set figure files
+
+
+dir.create(outdir)
+
+# set max digits
+options(digits=3)
+
+# set filtering criteria
+filterCPM <- 2
+numSamples <- 5
+
+```
+
+# Import all input data tables
+## DGEList object (filtered and normalised)
+```{r}
+# import the DGEList object
+dge_list_obj <- readRDS(input_dgelist_file)
+
+
+```
+
+# Calculate log2CPM and save table as .csv
+
+```{r}
+log2CPM <- edgeR::cpm(dge_list_obj, log = TRUE)
+
+# edgeR::cpm(dge_list_obj, log = TRUE) %>%
+#   as.data.frame() %>%
+#   tibble::rownames_to_column("ensembl") %>%
+#   write_csv(., file = output_log2CPM_file,
+#            col_names = TRUE)
+
+```
+
+# Differential Expression
+- covariate - maternal Age 
+
+```{r}
+# set the new factor levels
+sex_outcome_levels <- c("F_Control", "M_Control", "F_PE", "M_PE")
+
+## No covariates
+#Create and write out design matrix
+model_noCovariate <- '~0 + sex_outcome + maternalAge'
+# establish the design matrix
+design_sex_PE <- model.matrix(formula(model_noCovariate),
+                              data = dge_list_obj$samples)
+# make the column names a little nicer
+colnames(design_sex_PE) <- c(sex_outcome_levels, "maternalAge")
+
+# save a csv of the design matrix
+# write_csv(data.frame(design_sex_PE) %>%
+#             tibble::rownames_to_column("samplename"),
+#           file = outDesignMatrix_file,
+#           col_names = TRUE)
+```
+
+```{r}
+# perform the voom
+voom_sex_PE <- voom(dge_list_obj, design_sex_PE, plot = TRUE)
+
+# fit the linear model
+fit_sex_PE <- lmFit(voom_sex_PE, design_sex_PE)
+```
+
+```{r}
+# set the contrasts - this makes it easier to "see" what we're testing
+contrast_sex_PE <- makeContrasts(female_PE = F_PE-F_Control,
+                                 male_PE = M_PE-M_Control,
+                                 levels = design_sex_PE)
+contrast_sex_PE
+
+# fit a linear regression to the contrast questions
+contrast_fit_sex_PE <- contrasts.fit(fit_sex_PE, contrast_sex_PE)
+
+# perform bayesian adjustment
+contrast_fit_sex_PE <- eBayes(contrast_fit_sex_PE)
+
+# grab the residuals
+res_post_dedup <- residuals(fit_sex_PE,voom_sex_PE)
+# saveRDS(res_post_dedup,
+#         file = file.path(outdir, "residuals.rds"))
+
+# grab the fitted values
+fitted_post_dedup <- fitted(fit_sex_PE)
+# saveRDS(fitted_post_dedup,
+#         file = file.path(outdir, "fitted_values.rds"))
+
+# check the coefficients
+coefficients <- contrast_fit_sex_PE$coefficients
+# saveRDS(coefficients,
+#         file = file.path(outdir, "coefficients.rds"))
+dim(contrast_fit_sex_PE$coefficients)
+```
+
+```{r}
+# summary table of the sex PE fit
+summary(decideTests(contrast_fit_sex_PE,
+                    adjust.method = "fdr",
+                    p.value = 0.05))
+
+# all DE results for the female_PE comparison
+allTable_female_PE <- topTable(contrast_fit_sex_PE,
+                             coef = "female_PE",
+                             n = Inf,
+                             sort = "p")
+# create output files and save
+readr::write_csv(allTable_female_PE,
+          file=file.path(outdir, "allTable_female.csv"))
+
+# write_csv(allTable_female_PE,
+#           file="/media/sf_D_DRIVE/VM_Projects/20240723_compare_pre_post_dedup/allTable_female_post_dedup.csv")
+
+
+# all DE results for the male comparison
+allTable_male_PE <- topTable(contrast_fit_sex_PE,
+                             coef = "male_PE",
+                             n = Inf,
+                             sort = "p")
+readr::write_csv(allTable_male_PE,
+          file=file.path(outdir, "allTable_male.csv"))
+
+# write_csv(allTable_male_PE,
+#           file="/media/sf_D_DRIVE/VM_Projects/20240723_compare_pre_post_dedup/allTable_male_post_dedup.csv")
+
+# write out a few summary tables
+
+# Count occurrences for both conditions in a single pipeline
+seqname_counts <- allTable_male_PE %>%
+  dplyr::filter(., adj.P.Val < 0.05) %>%
+  mutate(condition = ifelse(logFC < 0, "down", "up")) %>%
+  group_by(seqnames, condition) %>%
+  summarise(count = n(), .groups = "drop")
+
+# View the result
+print(seqname_counts)
+
+df <- left_join(allTable_female_PE %>% dplyr::select(-t, -P.Value, -B),
+               allTable_male_PE %>% dplyr::select(-t, -P.Value, -B),
+               by=c('hgnc_symbol', 'ensembl'),
+          suffix=c("_F", "_M"))
+
+coeff_and_sigma_df <- cbind(fit_sex_PE$coefficients, sigma=fit_sex_PE$sigma) %>%
+  as.data.frame() %>%
+  rownames_to_column(var="ensembl")
+
+df <- left_join(coeff_and_sigma_df,
+               df,
+               by="ensembl")
+
+write_csv(df %>% relocate(hgnc_symbol, .after=ensembl),
+          file=output_spreadsheet_file)
+
+df2 <- left_join(allTable_female_PE %>% dplyr::select(ensembl, hgnc_symbol, t, P.Value, adj.P.Val),
+               allTable_male_PE %>% dplyr::select(ensembl, hgnc_symbol, t, P.Value, adj.P.Val),
+               by=c('hgnc_symbol', 'ensembl'),
+          suffix=c("_F", "_M"))
+
+write_csv(df2 %>% relocate(hgnc_symbol, .after=ensembl),
+          file=output_pValue_file)
+
+```
+
+## Volcano plot for visualisation of differential expression
+
+### female
+
+```{r volcano plots female}
+
+decide <- decideTests(contrast_fit_sex_PE)
+d2 <- topTable(contrast_fit_sex_PE, coef = 1, n = Inf, sort = "p") #[,c(2,6)]
+d2$threshold <- 0
+d2$threshold[0:nrow(filter(allTable_female_PE, adj.P.Val < 0.05))] <- 1
+d2$threshold <- as.factor(d2$threshold)
+d3 <- decideTests(contrast_fit_sex_PE) %>%
+  as.data.frame()
+d3 <- d3[1]
+d4 <- left_join(tibble::rownames_to_column(d2), (tibble::rownames_to_column(d3)),
+                       by = "rowname")
+d4$female_PE <- as.factor(d4$female_PE)
+d4$neg.log10FDR <- -log10(d4$adj.P.Val)
+# set colours for the volcano plot
+colour <- c("red", "black", "darkgreen")
+FDR_FC_Decide <- decideTests(contrast_fit_sex_PE, lfc = 0)[,"female_PE"] %>%
+  as.data.frame() %>%
+  set_colnames("FDR_FC_Decide") %>%
+  tibble::rownames_to_column() %>%
+  left_join(., d4, by = "rowname")
+FDR_FC_Decide$FDR_FC_Decide <- as.factor(FDR_FC_Decide$FDR_FC_Decide)
+
+volcano_female <- ggplot(data = FDR_FC_Decide,
+                  aes(x = logFC,
+                      y = neg.log10FDR,
+                      label = rowname,
+                      colour = FDR_FC_Decide)) +
+  geom_point(alpha=0.9, size=2.00) +
+  xlab(expression(Log[2]*" Fold Change")) + ylab(expression("-ve "*Log[10]*" FDR")) +
+  scale_color_manual(values = colour, name="mRNA\nRegulation",
+                         breaks = c("-1", "0", "1"),
+                         labels = c("Down-regulated", "Not Significant", "Up-regulated")) +
+  theme(plot.title = element_text(hjust = 0.5)) +
+  geom_hline(yintercept = -log10(.05), linetype = "dotted") +
+  geom_vline(xintercept = c(-1, 1), linetype = "dotted") +
+  theme_bw() +
+  theme(text = element_text(size=18)) +
+  theme(axis.text.x = element_text(colour = "black",
+                                   face = "bold"),
+        axis.text.y = element_text(colour = "black",
+                                   face = "bold")) +
+  theme(axis.title.x = element_text(colour = "black",
+                                   face = "bold"),
+        axis.title.y = element_text(colour = "black",
+                                   face = "bold")) +
+  geom_label_repel(data = dplyr::filter(FDR_FC_Decide, FDR_FC_Decide==1),
+                  aes(label = hgnc_symbol),
+                  fill = "white",
+                  xlim = c(7, 0),
+                  max.overlaps = Inf,
+                  show.legend = FALSE) +
+  geom_label_repel(data = dplyr::filter(FDR_FC_Decide, FDR_FC_Decide==-1),
+                  aes(label = hgnc_symbol),
+                  fill = "white",
+                  xlim = c(-7, 0),
+                  max.overlaps = Inf,
+                  show.legend = FALSE) +
+  theme(legend.position="bottom")
+
+ggsave(plot = volcano_female,
+       filename = file.path(outdir, "volcano_female.png"),
+       units = "in",
+       width = 12,
+       height = 12,
+       dpi = 300)
+
+
+```
+
+### male
+
+```{r volcano plots male}
+
+decide <- decideTests(contrast_fit_sex_PE)
+d2 <- topTable(contrast_fit_sex_PE, coef = 2, n = Inf, sort = "p") #[,c(2,6)]
+d2$threshold <- 0
+d2$threshold[0:nrow(filter(allTable_male_PE, adj.P.Val < 0.05))] <- 1
+d2$threshold <- as.factor(d2$threshold)
+d3 <- decideTests(contrast_fit_sex_PE) %>%
+  as.data.frame()
+d3 <- d3[2]
+d4 <- left_join(tibble::rownames_to_column(d2), (tibble::rownames_to_column(d3)),
+                       by = "rowname")
+d4$male_PE <- as.factor(d4$male_PE)
+d4$neg.log10FDR <- -log10(d4$adj.P.Val)
+# set colours for the volcano plot
+colour <- c("red", "black", "darkgreen")
+FDR_FC_Decide <- decideTests(contrast_fit_sex_PE, lfc = 0)[,"male_PE"] %>%
+  as.data.frame() %>%
+  set_colnames("FDR_FC_Decide") %>%
+  tibble::rownames_to_column() %>%
+  left_join(., d4, by = "rowname")
+FDR_FC_Decide$FDR_FC_Decide <- as.factor(FDR_FC_Decide$FDR_FC_Decide)
+
+volcano_male <- ggplot(data = FDR_FC_Decide,
+                  aes(x = logFC,
+                      y = neg.log10FDR,
+                      label = rowname,
+                      colour = FDR_FC_Decide)) +
+  geom_point(alpha=0.9, size=2.00) +
+  xlab(expression(Log[2]*" Fold Change")) + ylab(expression("-ve "*Log[10]*" FDR")) +
+  scale_color_manual(values = colour, name="mRNA\nRegulation",
+                         breaks = c("-1", "0", "1"),
+                         labels = c("Down-regulated", "Not Significant", "Up-regulated")) +
+  theme(plot.title = element_text(hjust = 0.5)) +
+  geom_hline(yintercept = -log10(.05), linetype = "dotted") +
+  geom_vline(xintercept = c(-1, 1), linetype = "dotted") +
+  theme_bw() +
+  theme(text = element_text(size=18)) +
+  theme(axis.text.x = element_text(colour = "black",
+                                   face = "bold"),
+        axis.text.y = element_text(colour = "black",
+                                   face = "bold")) +
+  theme(axis.title.x = element_text(colour = "black",
+                                   face = "bold"),
+        axis.title.y = element_text(colour = "black",
+                                   face = "bold")) +
+  geom_label_repel(data = dplyr::filter(FDR_FC_Decide, FDR_FC_Decide==1),
+                  aes(label = hgnc_symbol),
+                  fill = "white",
+                  xlim = c(7, 0),
+                  max.overlaps = Inf,
+                  show.legend = FALSE) +
+  geom_label_repel(data = dplyr::filter(FDR_FC_Decide, FDR_FC_Decide==-1),
+                  aes(label = hgnc_symbol),
+                  fill = "white",
+                  xlim = c(-7, 0),
+                  max.overlaps = Inf,
+                  show.legend = FALSE) +
+  theme(legend.position="bottom")
+
+ggsave(plot = volcano_male,
+       filename = file.path(outdir, "volcano_male.png"),
+       units = "in",
+       width = 12,
+       height = 12,
+       dpi = 300)
+
+
+```
+
+# Session information
+```{r session info}
+
+sessionInfo()
+
+```
