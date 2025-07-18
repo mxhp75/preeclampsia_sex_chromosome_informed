@@ -6,7 +6,7 @@ output: html_document
 ---
 
 # Load required libraries
-```{r load Libraries}
+```{r load Libraries, warning=FALSE}
 
 # Clean the environment
 rm(list = ls(all.names = TRUE)) # will clear all objects including hidden objects
@@ -15,6 +15,8 @@ gc() # free up memory and report the memory usage
 library(plyr)
 library(reshape2)
 library(dplyr)
+library(tidyr)
+library(knitr)
 library(stringr)
 library(edgeR)
 library(readxl)
@@ -121,9 +123,7 @@ gene_lists <- read_excel(input_gene_lists_file)
 # Metadata table for the paper
 
 ```{r}
-library(dplyr)
-library(tidyr)
-library(knitr)
+
 
 summary_table <- metadata %>%
   dplyr::left_join(., birthWgtCentile[,c("samplename", "Birthweight_centile")]) %>%
@@ -260,7 +260,7 @@ t_test_result_m <- t.test(BMI ~ sex_outcome,
 mean_difference_m <- t_test_result_m$estimate[2] - t_test_result_m$estimate[1]
 
 # P-value
-p_value <- t_test_result$p.value
+p_value <- t_test_result_m$p.value
 
 #-------------------------------------------------------------------------------#
 # Test maternal bmi - females
@@ -408,7 +408,7 @@ mean_difference_m <- t_test_result_m$estimate[2] - t_test_result_m$estimate[1]
 p_value <- t_test_result$p.value
 
 #-------------------------------------------------------------------------------#
-# Test maternal bmi - females
+# Test Birthweight centile - females
 #-------------------------------------------------------------------------------#
 
 # First, check normality and equal variance assumptions
@@ -449,7 +449,8 @@ median_lib_size <- rawCounts_deduplicated %>%
 
 
 data.frame(colSums(rawCounts_deduplicated[, -1])) %>%
-  rename(lib.size = colSums.rawCounts_deduplicated....1..) %>%
+  # rename(lib.size = colSums.rawCounts_deduplicated....1..) %>%
+  setNames("lib.size") %>%
   tibble::rownames_to_column("samplename") %>%
   mutate(color = case_when(
     lib.size < 5000000 ~ "red",
@@ -590,6 +591,7 @@ ggplot(pca_df, aes(x = PC1,
   theme_minimal()
 
 ```
+
 ## Correlate PCA and Mclust
 
 ```{r}
@@ -607,6 +609,25 @@ cibersort_proportions <- read.table(file = input_cibersortx_post_dedup_proportio
   # keep only the 58 final samples
   inner_join(metadata[, c("samplename")], by = "samplename")
 
+# Assuming your data is in a dataframe called 'cibersort_data'
+# where columns are cell types and rows are samples
+
+# Create a summary dataframe
+cibersort_summary_table <- data.frame(
+  Cell_Type = colnames(cibersort_proportions[, -1]),
+  Mean = sapply(cibersort_proportions[, -1], mean, na.rm = TRUE),
+  SD = sapply(cibersort_proportions[, -1], sd, na.rm = TRUE)
+)
+
+# Format to keep only necessary decimal places
+cibersort_summary_table$Mean <- round(cibersort_summary_table$Mean, 4)
+cibersort_summary_table$SD <- round(cibersort_summary_table$SD, 4)
+
+# Print or save the table
+print(cibersort_summary_table)
+
+# Optional: write to CSV
+write.csv(cibersort_summary_table, "cell_type_proportions_summary.csv", row.names = FALSE)
 
 # Merge Mclust cluster information with cell type proportions
 cluster_proportions <- data.frame(
@@ -760,7 +781,7 @@ for(cell_type in significant_cell_types) {
 
 
 # Plot MDS
-
+## base
 ```{r}
 # define colours for each sex_outcome group
 sex_outcome_levels <- levels(as.factor(dge_list_obj$samples$sex_outcome))
@@ -779,6 +800,54 @@ limma::plotMDS(dge_list_obj, col=col_vector, labels=dge_list_obj$samples$samplen
 legend("topright", legend=sex_outcome_levels, col=colors, pch=20, xpd=TRUE, inset=c(0.01, -0.1))
 # dev.off()
 ```
+
+## ggplot
+```{r}
+# Calculate MDS coordinates
+mds_result <- plotMDS(dge_list_obj, plot = FALSE)
+
+# Create data frame for ggplot
+mds_data <- data.frame(
+  x = mds_result$x,
+  y = mds_result$y,
+  sex_outcome = dge_list_obj$samples$sex_outcome,
+  samplename = dge_list_obj$samples$samplename
+)
+
+# Create the ggplot
+p <- ggplot(mds_data, aes(x = x, y = y, colour = sex_outcome)) +
+  geom_point(size = 5) +
+    scale_color_manual(values = c("palegreen3", "#004000",  "plum3", "#2A0052")) +
+  labs(
+    # title = "MDS Plot 58 samples - deduplicated",
+    x = paste0("Leading logFC dim 1 (", round(mds_result$var.explained[1]*100, 1), "%)"),
+    y = paste0("Leading logFC dim 2 (", round(mds_result$var.explained[2]*100, 1), "%)"),
+    color = "Fetal Sex and Outcome"
+    ) +
+  theme_classic() +
+  theme(
+    plot.title = element_text(hjust = 0.5, size = 14),
+    legend.position = "none",
+    legend.title = element_text(size = 12,
+                                colour = "black",
+                                face = "bold"),
+    legend.text = element_text(size = 12,
+                               colour = "black",
+                               face = "bold")
+    )
+
+# Display the plot
+print(p)
+
+# Save the plot (uncomment to save)
+ggsave(filename = output_mds_file,
+       plot = p,
+       width = 9,
+       height = 6,
+       units = "in",
+       dpi = 300)
+```
+
 # Sex-specific BCV
 
 ```{r}
@@ -904,14 +973,57 @@ head(bcv_table_sorted)
 # Calculate log2CPM and save table as .csv
 
 ```{r}
-log2CPM <- edgeR::cpm(dge_list_obj, log = TRUE)
-
+# # calculate the log2 CPM for all genes in all samples
+# log2CPM <- edgeR::cpm(dge_list_obj, log = TRUE)
+# 
 # edgeR::cpm(dge_list_obj, log = TRUE) %>%
 #   as.data.frame() %>%
 #   tibble::rownames_to_column("ensembl") %>%
 #   write_csv(., file = output_log2CPM_file,
 #            col_names = TRUE)
 
+# import the log2CPM file
+log2CPM <- read_csv("/home/smit1924/preeclampsia_sex_chromosome_informed/deduplicated_clearBox/output/58_sample_noCovariate/log2CPM.csv")
+
+# calculate the average log2 CPM for all genes by sex_outcome group
+# Step 1: Convert log2CPM from wide to long format
+log2CPM_long <- log2CPM %>%
+  as.data.frame() %>%
+  tidyr::pivot_longer(cols = -ensembl, names_to = "samplename", values_to = "Expression")
+
+# Step 2: Merge with metadata to get 'sex_outcome' group
+merged_data <- log2CPM_long %>%
+  left_join(metadata[, c("samplename", "sex_outcome")], by = "samplename")  # Merge using sample names
+
+# Step 3: Calculate average expression per gene for each 'sex_outcome' group
+avg_expression_by_group <- merged_data %>%
+  group_by(ensembl, sex_outcome) %>%
+  summarize(AveExpr = mean(Expression, na.rm = TRUE), .groups = "drop")  # Mean log2CPM
+
+# View the results
+head(avg_expression_by_group)
+
+# Step 4: Filter allTable_male for significant DE genes
+allTable_male <- read_csv("/home/smit1924/preeclampsia_sex_chromosome_informed/deduplicated_clearBox/output/58_sample_noCovariate/allTable_male.csv")
+
+significant_genes <- allTable_male %>%
+  dplyr::filter(abs(logFC) >= 1, adj.P.Val < 0.05, AveExpr >=1) %>%
+  dplyr::select(ensembl)  # Keep only the ensembl column for filtering
+
+# Step 5: Filter avg_expression_by_group to keep only significant genes
+filtered_avg_expr <- avg_expression_by_group %>%
+  semi_join(significant_genes, by = "ensembl")
+
+# View the filtered results
+head(filtered_avg_expr)
+
+filtered_avg_expr_wide <- filtered_avg_expr %>%
+  tidyr::pivot_wider(names_from = sex_outcome, values_from = AveExpr)
+
+# save a csv of the average logFC for each of the groups
+write_csv(data.frame(filtered_avg_expr_wide),
+          file = file.path(outdir, "averageLog2CPM.csv"),
+          col_names = TRUE)
 ```
 
 # Differential Expression
@@ -1535,16 +1647,16 @@ scaled_male <- subset(scaled_exp, rownames(scaled_exp) %in% males$samplename)
 #     height=8,
 #     units = "in",
 #     res = 150)
-pheatmap(t(scaled_male),
-         annotation_col = annotation_cols,
-         annotation_row = annotation_rows,
-         annotation_colors = annotation_colors,
-         show_rownames = FALSE,
-         show_colnames = TRUE,
-         cutree_cols = 3,
-         treeheight_row = FALSE,
-         clustering_callback = callback)
-dev.off()
+# pheatmap(t(scaled_male),
+#          annotation_col = annotation_cols,
+#          annotation_row = annotation_rows,
+#          annotation_colors = annotation_colors,
+#          show_rownames = FALSE,
+#          show_colnames = TRUE,
+#          cutree_cols = 3,
+#          treeheight_row = FALSE,
+#          clustering_callback = callback)
+# dev.off()
 
 ```
 
@@ -1562,19 +1674,19 @@ rankFile_female <- dplyr::select(allTable_female, hgnc_symbol, rank) %>%
   arrange(., rank)
 
 # write out the table ready for GSEAe
-write.table(rankFile_female,
-            file = file.path(outdir, "PE_female_rankFile.rnk"),
-            sep = "\t", 
-            row.names = FALSE,
-            col.names = TRUE,
-            quote = FALSE)
+# write.table(rankFile_female,
+#             file = file.path(outdir, "PE_female_rankFile.rnk"),
+#             sep = "\t", 
+#             row.names = FALSE,
+#             col.names = TRUE,
+#             quote = FALSE)
 
-write.table(rankFile_female,
-            file = file.path("/media/sf_D_DRIVE/VM_Projects/preeclampsia_sex_chromosome_informed/PE_female_rankFile.rnk"),
-            sep = "\t", 
-            row.names = FALSE,
-            col.names = TRUE,
-            quote = FALSE)
+# write.table(rankFile_female,
+#             file = file.path("/media/sf_D_DRIVE/VM_Projects/preeclampsia_sex_chromosome_informed/PE_female_rankFile.rnk"),
+#             sep = "\t", 
+#             row.names = FALSE,
+#             col.names = TRUE,
+#             quote = FALSE)
 
 
 ```
@@ -1592,19 +1704,19 @@ rankFile_male <- dplyr::select(allTable_male, hgnc_symbol, rank) %>%
   arrange(., rank)
 
 # write out the table ready for GSEAe
-write.table(rankFile_male,
-            file = file.path(outdir, "PE_male_rankFile.rnk"),
-            sep = "\t", 
-            row.names = FALSE,
-            col.names = TRUE,
-            quote = FALSE)
+# write.table(rankFile_male,
+#             file = file.path(outdir, "PE_male_rankFile.rnk"),
+#             sep = "\t", 
+#             row.names = FALSE,
+#             col.names = TRUE,
+#             quote = FALSE)
 
-write.table(rankFile_male,
-            file = file.path("/media/sf_D_DRIVE/VM_Projects/preeclampsia_sex_chromosome_informed/PE_male_rankFile.rnk"),
-            sep = "\t", 
-            row.names = FALSE,
-            col.names = TRUE,
-            quote = FALSE)
+# write.table(rankFile_male,
+#             file = file.path("/media/sf_D_DRIVE/VM_Projects/preeclampsia_sex_chromosome_informed/PE_male_rankFile.rnk"),
+#             sep = "\t", 
+#             row.names = FALSE,
+#             col.names = TRUE,
+#             quote = FALSE)
 
 
 ```
@@ -1613,6 +1725,18 @@ write.table(rankFile_male,
 - scatter plot of the male (x-axis) and female (y-axis) log2 fold change  
 
 ```{r}
+
+# Import male DE table
+allTable_male_PE <- read_csv(file.path(outdir, "allTable_male.csv"))
+
+# Import female DE table
+allTable_female_PE <- read_csv(file.path(outdir, "allTable_female.csv"))
+
+df <- left_join(allTable_female_PE %>% dplyr::select(-t, -P.Value, -B),
+               allTable_male_PE %>% dplyr::select(-t, -P.Value, -B),
+               by=c('hgnc_symbol', 'ensembl'),
+          suffix=c("_F", "_M"))
+
 
 # Calculate the maximum absolute value across both logFC columns for symmetric axis scaling
 max_abs_fc <- max(abs(c(df$logFC_M, df$logFC_F)), na.rm = TRUE)
@@ -1661,13 +1785,13 @@ p <- ggplot(df, aes(x = logFC_M, y = logFC_F)) +
 # Display the plot
 print(p)
 
-ggsave(filename = file.path(outdir, "melissaPlots/logFC_M_v_logFC_M.jpeg"),
-       create.dir = TRUE,
-       plot = p,
-       units = "in",
-       width = 10,
-       height = 10,
-       dpi = 150)
+# ggsave(filename = file.path(outdir, "melissaPlots/logFC_M_v_logFC_M.jpeg"),
+#        create.dir = TRUE,
+#        plot = p,
+#        units = "in",
+#        width = 10,
+#        height = 10,
+#        dpi = 150)
 ```
 - violin plots of selected DE genes  
 
