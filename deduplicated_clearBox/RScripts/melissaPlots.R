@@ -87,7 +87,7 @@ p <- ggplot(df, aes(x = logFC_M, y = logFC_F)) +
   geom_vline(xintercept = 0, linetype = "dashed", color = "grey50") +
   # Add labels and title
   labs(
-    title = "Differential Gene Expression: Male vs Female",
+    # title = "Differential Gene Expression: Male vs Female",
     x = expression(log[2]~"Fold Change (Male)"),
     y = expression(log[2]~"Fold Change (Female)")
   ) +
@@ -97,9 +97,9 @@ p <- ggplot(df, aes(x = logFC_M, y = logFC_F)) +
   coord_fixed(ratio = 1)
 
 # Display the plot
-print(p)
+# print(p)
 
-ggsave(filename = file.path(outdir, "melissaPlots/logFC_M_v_logFC_M.pdf"),
+ggsave(filename = file.path(outdir, "melissaPlots/logFC_M_v_logFC_M.png"),
        create.dir = TRUE,
        plot = p,
        units = "in",
@@ -217,7 +217,13 @@ p1 <- ggplot(allTable_male_PE, aes(x = logFC, y = -log10(P.Value))) +
        y = expression(-log[10]~"P-value"),
        title = "Male",
        color = "Differential Expression") +
-  theme_bw()
+  theme_bw() +
+  theme(
+    axis.title.x = element_text(size = 14, color = "black"),
+    axis.title.y = element_text(size = 14, color = "black"),
+    axis.text.x = element_text(size = 12, color = "black"),
+    axis.text.y = element_text(size = 12, color = "black")
+  )
 
 # Create the female plot
 p2 <- ggplot(allTable_female_PE, aes(x = logFC, y = -log10(P.Value))) +
@@ -233,11 +239,17 @@ p2 <- ggplot(allTable_female_PE, aes(x = logFC, y = -log10(P.Value))) +
        y = expression(-log[10]~"P-value"),
        title = "Female") +  # No color legend
   guides(color = "none") + # Suppress the legend
-  theme_bw()
+  theme_bw() +
+  theme(
+    axis.title.x = element_text(size = 14, color = "black"),
+    axis.title.y = element_text(size = 14, color = "black"),
+    axis.text.x = element_text(size = 12, color = "black"),
+    axis.text.y = element_text(size = 12, color = "black")
+  )
 
 # Combine the plots and collect legends
 combinedVolcano_plot <- (p1 + p2) +
-  plot_annotation(tag_levels = "a") +
+  # plot_annotation(tag_levels = "a") +
   plot_layout(guides = "collect") &
   theme(legend.position = "bottom")
 
@@ -245,11 +257,11 @@ combinedVolcano_plot <- (p1 + p2) +
 print(combinedVolcano_plot)
 
 
-ggsave(filename = file.path(outdir, paste0("finalManuscriptPlots/", "combinedVolcano.jpeg")),
+ggsave(filename = file.path(outdir, paste0("finalManuscriptPlots/", "combinedVolcano.png")),
        create.dir = TRUE,
        plot = combinedVolcano_plot,
        units = "in",
-       width = 10,
+       width = 12,
        height = 10,
        dpi = 300)
 
@@ -359,16 +371,17 @@ p6 <- ggplot(subset(plot_data, hgnc_symbol %in% c(upReg_genes, downReg_genes)), 
   # coord_flip() +
   theme_bw() +  # Clean theme
   scale_fill_manual(values = c("palegreen3", "#004000",  "plum3", "#2A0052")) +
-  labs(title = paste("Expression of DE genes by Fetal Sex & Outcome"),
-       x = "Sex & Outcome",
-       y = expression(log[2]~"CPM Expression")) +
-  facet_wrap(~hgnc_symbol, ncol = 7, scales = "free") +
+  labs(
+    # title = paste("Expression of DE genes by Fetal Sex & Outcome"),
+    x = "Sex & Outcome",
+    y = expression(log[2]~"CPM Expression")) +
+  facet_wrap(~hgnc_symbol, ncol = 5, scales = "free") +
   theme(legend.position = "none")
 
 ggsave(filename = file.path(outdir, paste0("finalManuscriptPlots/", "all_DE_violins.jpeg")),
        create.dir = TRUE,
        plot = p6,
        units = "in",
-       width = 30,
+       width = 15,
        height = 15,
        dpi = 300)
