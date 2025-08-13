@@ -75,6 +75,7 @@ output_correlation_heatmap_mergedModules_file <- file.path(outdir, "module_to_mo
 
 output_wgcna_merged_modules_colours_file <- file.path(outdir, "wgcna_merged_modules_colours.rds")
 output_wgcna_datExpr_file <- file.path(outdir, "wgcna_datExpr.rds")
+output_wgcna_topTen_hubGenes_file <- file.path(outdir, "hub_genes_by_module.csv")
 
 ```
 
@@ -335,7 +336,7 @@ WGCNA::plotDendroAndColors(sampleTree,
                     main = "Sample Dendrogram and Heatmap")
 ```
 
-## Network Construction
+## Determining the soft-thresholding power for network construction
 
 Prior to identifying which genes are correlated with each other, need to select a soft power threshold
 
@@ -343,7 +344,7 @@ The first step in constructing a scale-free gene co-expression requires choosing
 
 Here, we test a range of possible soft-thresholding powers to find the minimum one which results in approximately [scale-free topology](https://en.wikipedia.org/wiki/Scale-free_network) for the male and female gene expression networks. We define an appropriate minimum scale-free topology fitting index *R<sup>2</sup>* to be at least 0.20 (80% confidence). This step takes a couple of mins to run. 
 
-```{r Choose-Soft-Thresholding-Power, message=FALSE, warning=FALSE}
+```{r message=FALSE, warning=FALSE}
 
 # 1. Normalize the counts to CPM (log-transformed)
 lcpm <- edgeR::cpm(male_dgeList, log = TRUE)
@@ -395,46 +396,9 @@ Next the adjacency matrix will be created for the formation of the gene co-expre
 
 In developing a network, the direction of the correlation of genes is important. The stringency applied when identifying biologically significant modules will increase by only identifying those genes which are positively correlated with one another.
 
-# Create Topological Overlap Matrix
+## Apply the adjacency function using the soft threshold
+
 ```{r}
-# # make sure we pull cor() from the WGCNA name space
-# cor <- WGCNA::cor
-# 
-# # set the soft power identified earlier
-# power <- sft$powerEstimate
-# 
-# ## Option 1: use the blockwise "automatic" module creation. This can be faster when running large datasets but does limit some of our choices. I'll run it and take a look but will likely go ahead with the step-by-step module creation for this smaller dataset.
-# net <- blockwiseModules(datExpr,
-#                         TOMType = "signed",
-#                         power = power,
-#                         minModuleSize = 30,
-#                         reassignThreshold = 0,
-#                         mergeCutHeight = 0.25,
-#                         numericLabels = TRUE,
-#                         pamRespectsDendro = FALSE,
-#                         saveTOMs = FALSE,
-#                         verbose = 3)
-
-# # return the cor() function to default
-# cor <- stats::cor
-# 
-# # Plot the blockwise modules
-# sizeGrWindow(12, 9)
-# mergedColors <- labels2colors(net$colors)
-# # png(file = output_blockwiseModuleDendrogram_file,
-# #     width = 12,
-# #     height = 6,
-# #     units = "in",
-# #     res = 150)
-# plotDendroAndColors(net$dendrograms[[1]], mergedColors[net$blockGenes[[1]]],
-#                     "Module Colours",
-#                     dendroLabels = FALSE,
-#                     hang = 0.03,
-#                     addGuide = TRUE,
-#                     guideHang = 0.05)
-# # dev.off()
-
-## Option 2: step-by-step
 
 # set the soft power identified earlier
 softPower <- sft$powerEstimate
@@ -446,16 +410,24 @@ adjacency <- adjacency(datExpr,
                        type = "signed",
                        power = softPower)
 
-# Calculate the Topological Overlap Matrix (TOM): TOM: Refines these connections by considering shared neighbors (i.e., indirect connections between genes).
-# The TOM measures the interconnectedness of genes by considering not only the direct correlation between two genes but also the genes they are connected to. Genes with a high TOM value are part of a tightly connected network or module.
-# The TOM matrix refines the adjacency matrix by identifying modules of genes that are highly interconnected.
-# The TOM matrix, like the adjacency matrix, contains values between 0 and 1. Higher values in the TOM matrix indicate stronger connections between genes in terms of their shared neighbors in the network.
-TOM <- TOMsimilarity(adjacency,
-                     TOMType = "signed")
+```
+
+# Calculate the Topological Overlap Matrix (TOM)
+TOM: Refines these connections by considering shared neighbors (i.e., indirect connections between genes).  
+The TOM measures the interconnectedness of genes by considering not only the direct correlation between two genes but also the genes they are connected to. Genes with a high TOM value are part of a tightly connected network or module.  
+The TOM matrix refines the adjacency matrix by identifying modules of genes that are highly interconnected.  
+The TOM matrix, like the adjacency matrix, contains values between 0 and 1. Higher values in the TOM matrix indicate stronger connections between genes in terms of their shared neighbors in the network.  
+
+```{r}
+
+
+# Calculate the TOM and the dissimilarity matrix (based on topological overlap)
+TOM <- TOMsimilarity(adjMat=adjacency,
+                     TOMType="signed") # specify the "signed" network
 
 # Calculate the dissimilarity matrix (or distance matrix) based on the TOM. Dissimilarity Matrix (dissTOM): Converts the TOM into a distance measure, which is used for clustering genes into co-expression modules
 dissTOM <- 1-TOM
-dim(dissTOM)
+dim(dissTOM) # 2077 2077
 
 # Construct modules: cluster genes into co-expression modules
 geneTree <- hclust(as.dist(dissTOM),
@@ -485,7 +457,7 @@ table(dynamicModules)
 # how many modules do we have?
 length(table(dynamicModules)) # 19 modules including the grey module
 
-# convert numeric labels into colours
+# convert numeric labels into colours (modules are initially assigned a number)
 dynamicColours <- labels2colors(dynamicModules)
 # table giving the number of genes in each un-merged cluster
 unmergedClusters <- data.frame(table(dynamicColours))
@@ -511,18 +483,27 @@ unmerged_gene_module_table <- data.frame(
   Gene = colnames(datExpr),
   Module = dynamicColours
 )
+```
 
+# Merge modules 
+This code merges similar gene co-expression modules based on how correlated their eigengenes (module expression summaries) are.  
+Modules with highly similar expression patterns across samples may represent overlapping biology. Merging them simplifies interpretation and helps avoid issues in downstream analyses like GSEA, especially when some modules are very small.  
+
+```{r}
 
 # Merge Modules
-## Calculate Eigengenes
+## Calculate Eigengenes to summarise each module’s expression profile.
 MEList <- moduleEigengenes(datExpr,
                            colors = dynamicColours)
 MEs <- MEList$eigengenes
-# Calculate dissimilarity of eigengenes
+
+# Compute dissimilarity: measure how different the eigengenes are (1 − correlation).
 MEDiss <- 1-cor(MEs)
-# Cluster module eigengenes
+
+# Cluster module eigengenes to identify groups of similar modules.
 METree <- hclust(as.dist(MEDiss),
                  method = "average")
+
 # Plot the result - clusters of similarity based on eigengene
 plot(METree,
      main = "Clustering of Module Eigengenes",
@@ -530,11 +511,11 @@ plot(METree,
      sub = "")
 
 # We have 19 modules which means some have very few genes. We might like to merge some of the modules to help with downstream GSEA
-# Merge similar modules based on a 15% simnilarity
+# Merge similar modules based on a 15% similarity (ie combine modules whose eigengenes are ≥85% correlated (cutHeight = 0.15)).
 MEDissThreshold <- 0.15
 abline(h = MEDissThreshold, col = "red")
-merge <- mergeCloseModules(datExpr,
-                           dynamicColours,
+merge <- mergeCloseModules(exprData = datExpr,
+                           colors = dynamicColours,
                            cutHeight = MEDissThreshold,
                            verbose = 3)
 
@@ -609,7 +590,8 @@ mergedMEs <- merge$newMEs
 #     height = 6,
 #     units = "in",
 #     res = 150)
-plotDendroAndColors(geneTree, cbind(dynamicColours, merge$colors), 
+plotDendroAndColors(geneTree,
+                    cbind(dynamicColours, merge$colors), # unmerged and merged colours
                     c("Dynamic Tree Cut", "Merged Dynamic"),
                     dendroLabels = FALSE, 
                     hang = 0.03,
@@ -665,7 +647,8 @@ for (i in 1:length(merge$newMEs)) {
                                   edgeFile = file.path(outdir, paste0("merge_CytoscapeInput-edges-", safeModuleName, ".txt")),
                                   nodeFile = file.path(outdir, paste0("merge_CytoscapeInput-nodes-", safeModuleName, ".txt")),
                                   weighted = TRUE,
-                                  threshold = -1,
+                                  # threshold = -1,
+                                  threshold = 0.075,
                                   nodeNames = modGenes,
                                   nodeAttr = nodeAttr
   )
@@ -690,7 +673,7 @@ all_edges <- edge_files %>%
 
 # Save edge file
 write.csv(all_edges,
-          file = paste0(outdir, "/combined_edges.csv"),
+          file = paste0(outdir, "/combined_edges_0.075.csv"),
           row.names = FALSE)
 
 # Read and combine node files
@@ -707,7 +690,7 @@ duplicates <- all_edges %>%
 
 # Save node file
 write.csv(all_nodes,
-          file = paste0(outdir, "/combined_nodes.csv"),
+          file = paste0(outdir, "/combined_nodes_0.075.csv"),
           row.names = FALSE)
 
 # Optional: check dimensions of combined objects
@@ -916,7 +899,7 @@ create_module_trait_correlation <- function(module_type = "unmerged",
   # Calculate correlations and p-values
   nSamples <- nrow(modules_of_interest)
   moduleTraitCor <- cor(modules_of_interest, trait_data, use = "p")
-  moduleTraitPvalue <- corPvalueStudent(moduleTraitCor, nSamples)
+  moduleTraitPvalue <- WGCNA::corPvalueStudent(moduleTraitCor, nSamples)
   
   # Create text matrix for significant correlations
   textMatrix <- ifelse(moduleTraitPvalue < p_threshold,
@@ -931,12 +914,12 @@ create_module_trait_correlation <- function(module_type = "unmerged",
   
   # Create heatmap
   par(mar = c(15, 12, 5, 5))
-  labeledHeatmap(Matrix = moduleTraitCor,
+  WGCNA::labeledHeatmap(Matrix = moduleTraitCor,
                  xLabels = colnames(trait_data),
                  yLabels = colnames(modules_of_interest),
                  ySymbols = colnames(modules_of_interest),
                  colorLabels = FALSE,
-                 colors = blueWhiteRed(50),
+                 colors = WGCNA::blueWhiteRed(50),
                  textMatrix = textMatrix,
                  setStdMargins = FALSE,
                  cex.text = 0.5,
@@ -990,6 +973,155 @@ all_trait_cors <- create_module_trait_correlation(
 
 dev.off()
 ```
+## Final module trait correlation figure
+
+```{r}
+library(WGCNA)
+library(ComplexHeatmap)
+library(circlize)
+
+# --- Choose module eigengenes data ---
+modules_of_interest <- dplyr::select(mergedMEs_colour, -grey) # merged version, drop grey
+
+# --- Make sure sample names match ---
+stopifnot(all(rownames(modules_of_interest) == rownames(traitsAll)))
+
+# --- Subset trait data if needed ---
+trait_data_sub <- dplyr::select(traitsAll, -map, -max_sbp, -max_dbp)
+
+# --- Calculate correlations and p-values ---
+nSamples <- nrow(modules_of_interest)
+moduleTraitCor <- cor(modules_of_interest, trait_data_sub, use = "p")
+moduleTraitPvalue <- corPvalueStudent(moduleTraitCor, nSamples)
+
+# --- Create annotation text for significant correlations ---
+p_threshold <- 0.05
+textMatrix <- ifelse(moduleTraitPvalue < p_threshold,
+                     paste0(signif(moduleTraitCor, 2), "\n(",
+                            signif(moduleTraitPvalue, 1), ")"),
+                     "")
+
+# --- Replace the cell types in the column names to remove periods ---
+
+# Create a named vector of new labels so the final plot has pretty labels
+new_labels <- c(
+  "GestationalAge" = "Gestational Age",
+  "BMI" = "Maternal BMI",
+  "maternalAge" = "Maternal Age",
+  "sex_outcome" = "Preeclampsia (Male)",
+  "Cytotrophoblast" = "Fetal Cytotrophoblasts",
+  "Fetal.Extravillous.Trophoblasts" = "Fetal Extravillous Trophoblasts",
+  "Fetal.Mesenchymal.Stem.Cells" = "Fetal Mesenchymal Stem Cells",
+  "Fetal.GZMK..Natural.Killer" = "Fetal GZMK Natural Killer Cells",
+  "Fetal.Memory.CD4..T.Cells" = "Fetal Memory CD4 T Cells",
+  "Fetal.Hofbauer.Cells" = "Fetal Hofbauer Cells",
+  "Fetal.Plasmacytoid.Dendritic.Cells" = "Fetal Plasmacytoid Dendritic Cells",
+  "Fetal.GZMB..Natural.Killer" = "Fetal GZMB Natural Killer Cells",
+  "Fetal.Endothelial.Cells" = "Fetal Endothelial Cells",
+  "Fetal.Syncytiotrophoblast" = "Fetal Syncytiotrophoblast",
+  "Fetal.Fibroblasts" = "Fetal Fibroblasts",
+  "Fetal.Nucleated.Red.Blood.Cells" = "Fetal Nucleated Red Blood Cells",
+  "Maternal.FCGR3A..Monocytes" = "Maternal FCGR3A Monocytes",
+  "Maternal.Plasma.Cells" = "Maternal Plasma Cells",
+  "CD14..Monocytes" = "CD14 Monocytes",
+  "CD8..Activated.T.Cells" = "CD8 Activated T Cells",
+  "Naive.CD4..T.Cells" = "Naive CD4 T Cells",
+  "Naive.CD8..T.Cells" = "Naive CD8 T Cells",
+  "Natural.Killer.T.Cells" = "Natural Killer T Cells",
+  "B.Cells" = "B Cells"
+)
+
+# replace the colnames
+colnames(moduleTraitCor) <- new_labels[colnames(moduleTraitCor)]
+
+# sanity check the dimensions
+dim_moduleTraitCor <- dim(moduleTraitCor) # 8 17
+
+# --- Define color mapping ---
+col_fun <- colorRamp2(c(-1, 0, 1), c("blue", "white", "red"))
+
+# --- Named palette for module colours ---
+module_colors_named <- c(
+  black = "#191A1A",
+  green = "#12A89D",
+  darkblue = "#0B5A9C",
+  lightblue = "#25AAE2",
+  pink = "#BE3597",
+  orange = "#FCAE3F",
+  grey = "grey",
+  red = "#DB4149",
+  purple = "#652D90"
+)
+
+# --- Get module names (ensure no 'ME' prefix) ---
+module_names <- gsub("^ME", "", rownames(moduleTraitCor))
+
+# --- Create annotation factor ---
+module_factor <- factor(module_names, levels = names(module_colors_named))
+
+# --- Row annotation object without legend ---
+row_ha <- rowAnnotation(
+  ModuleColour = module_factor,
+  col = list(ModuleColour = module_colors_named),
+  show_annotation_name = FALSE,
+  show_legend = FALSE
+)
+
+# --- Plot with ComplexHeatmap ---
+module_trait_correlation_heatmap <- Heatmap(
+  matrix = moduleTraitCor,
+  
+  show_heatmap_legend = FALSE,
+  
+  # heatmap_legend_param = list(
+  #   title = "Pearson\nCorrelation",
+  #   at = c(-1, -0.5, 0, 0.5, 1),
+  #   labels = c("-1", "-0.5", "0", "0.5", "1"),
+  #   # title_gp = gpar(fontsize = 12, fontface = "bold"),
+  #   labels_gp = gpar(fontsize = 10),
+  #   direction = "horizontal"
+  # ),
+  
+  cluster_rows = TRUE,
+  clustering_distance_rows = "euclidean",
+  clustering_method_rows = "complete",
+  row_dend_side = "left",
+  row_dend_width = unit(10, "mm"),
+  show_row_dend = TRUE,
+  
+  cluster_columns = FALSE,
+  
+  name = "Correlation",
+  
+  left_annotation = row_ha,
+  
+  
+  col = col_fun,
+  cell_fun = function(j, i, x, y, width, height, fill) {
+    grid.text(textMatrix[i, j], x, y, gp = gpar(fontsize = 8))
+  },
+  
+  column_title = "",
+  row_title = "Modules",
+  row_names_side = "left",
+  column_names_side = "bottom",
+  
+  width = ncol(moduleTraitCor) * unit(10, "mm"), 
+  height = nrow(moduleTraitCor) * unit(8, "mm"),
+  
+  border = FALSE
+)
+
+# Save the trait correlation heatmap
+png(file = file.path(outdir, "module_trait_correlation_heatmap.png"),
+    width = 10,
+    height = 8,
+    units = "in",
+    res = 300)
+print(module_trait_correlation_heatmap)
+dev.off()
+```
+
 
 # Intramodular connectivity: identifying genes with high geneModuleMembership & geneTraitSignficance
 ## Un-Merged
@@ -1507,17 +1639,23 @@ topHubGenesInModule <- cbind(Gene = colnames(adjacency),
 ## Merged modules
 
 ```{r}
+# Fix column names in mergedMEs - remove underscore to match WGCNA expectations
+# Change "ME_green" to "MEgreen", etc.
+copy_mergedMEs <- mergedMEs
+colnames(copy_mergedMEs) <- gsub("ME_", "ME", colnames(copy_mergedMEs))
+
 # Calculate the proportion of variation (in each module) explained by the eigengene
 propExp <- propVarExplained(datExpr = datExpr,
-                            colors = mergedColours,
-                            MEs = mergedMEs,
+                            colors = new_moduleColors,
+                            MEs = copy_mergedMEs,
                             corFnc = "bicor",
                             corOptions = "use = 'p'") %>%
-  as.data.frame()
+  as.data.frame()  %>%
+  mutate(across(everything(), ~ round(.x, 2)))
 
 # calculate the kME (module membership) for each gene
 kME <- signedKME(datExpr = datExpr,
-                 datME = mergedMEs,
+                 datME = copy_mergedMEs,
                  exprWeights = NULL,
                  MEWeights = NULL,
                  outputColumnName = "kME_",
@@ -1525,24 +1663,52 @@ kME <- signedKME(datExpr = datExpr,
                  corOptions = "use = 'p'")
 
 # Find genes in the top 10 kME for multiple modules, including module names
-top_genes <- setNames(lapply(unique(mergedColours), function(module) {
+top_genes <- setNames(lapply(unique(new_moduleColors), function(module) {
   # Select genes in the current module
-  genes_in_module <- rownames(kME)[mergedColours == module]
+  genes_in_module <- rownames(kME)[new_moduleColors == module]
   
   # Sort genes by kME and select the top 10
   top_genes_in_module <- genes_in_module[order(kME[genes_in_module, paste0("kME_", module)], decreasing = TRUE)[1:10]]
   
   return(top_genes_in_module)
-}), unique(mergedColours)) # Name each list element by the module color
+}), unique(new_moduleColors)) # Name each list element by the module color
 
 # Check for overlaps
 top_genes_overlap <- Reduce(intersect, top_genes)
 print(top_genes_overlap)
 
+# Generate a table with module names and their top 10 hub genes
+hub_genes_table <- data.frame(
+  Module = names(top_genes),
+  Hub_Genes = sapply(top_genes, function(genes) {
+    paste(genes, collapse = ", ")
+  }),
+  stringsAsFactors = FALSE
+)
+
+# View the table
+print(hub_genes_table)
+
+# Create a more formatted table using kable (if you have knitr installed)
+library(knitr)
+library(kableExtra)
+
+# Formatted table for publication
+formatted_table <- hub_genes_table %>%
+  kable(col.names = c("Module", "Top 10 Hub Genes"),
+        caption = "Top 10 hub genes for each module based on kME values") %>%
+  kable_styling(bootstrap_options = c("striped", "hover", "condensed"),
+                full_width = FALSE) %>%
+  column_spec(2, width = "30em")
+
+
+# Save as CSV
+write.csv(hub_genes_table, output_wgcna_topTen_hubGenes_file, row.names = FALSE)
+
 
 # find the hub gene for each module
 topHubGene <- chooseTopHubInEachModule(datExpr = datExpr,
-                                        colorh = mergedColours,
+                                        colorh = new_moduleColors,
                                         omitColors = "grey",
                                         power = 2,
                                         type = "signed") %>%
