@@ -57,6 +57,7 @@ output_log2CPM_file <- file.path(outdir, "log2CPM.csv")
 output_dgelist_58_file <- file.path(outdir, "filt_norm_dgelist_58.rds")
 output_gene_wise_bcv_results_male_file <- file.path(outdir, "dedup_gene_wise_bcv_results_male.csv")
 output_gene_wise_bcv_results_female_file <- file.path(outdir, "dedup_gene_wise_bcv_results_female.csv")
+output_rawCounts_file <- file.path(outdir, "rawCounts.txt")
 
 # set figure files
 output_librarySize_file <- file.path(outdir, "deduplicated_librarySizePlot.png")
@@ -504,6 +505,14 @@ dge_list_obj <- DGEList(counts = counts_hgnc_clean %>%
                         samples = metadata,
                         group = metadata$group,
                         genes = counts_hgnc_clean %>% dplyr::select(ensembl, hgnc_symbol, seqnames, gene_type))
+
+## Save a table of raw counts
+write.table(dge_list_obj$counts,
+            file = output_rawCounts_file,
+            sep = "\t",
+            row.names = TRUE,
+            col.names = NA,  # This ensures proper alignment with rownames
+            quote = FALSE)
 
 ```
 
